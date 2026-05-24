@@ -1,0 +1,14 @@
+# .config/nextest.toml
+
+[store]
+dir = "target/nextest"
+
+[profile.default]
+retries = 0
+fail-fast = true
+test-threads = "num-cpus"
+
+[profile.ci]
+inherits = "default"
+fail-fast = false
+junit.path = "target/nextest/ci.xml"

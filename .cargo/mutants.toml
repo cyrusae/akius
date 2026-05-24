@@ -1,0 +1,4 @@
+# .cargo/mutants.toml
+test_tool = "nextest"
+timeout = 300
+exclude_re = ["tests/", "benches/", "examples/"]
