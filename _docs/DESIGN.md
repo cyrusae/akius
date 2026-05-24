@@ -14,7 +14,7 @@ akiuS is a physics-based puzzle game in which the player slides spheres across a
 
 ## Core Mechanic
 
-The player is positioned at the near end of a rectangular table viewed from an isometric angle. Each turn, the player is given a sphere to slide. The player taps a position along the near edge to determine lateral placement; the sphere launches at a fixed power in the direction away from the player. Surface friction determines how far the sphere travels before coming to rest.
+The player is positioned at the near end of a rectangular table viewed from an isometric angle. Each turn, the player is given a sphere to slide. The player moves their cursor to determine lateral placement along the near edge (calculated via raycasting the mouse position onto the table's horizontal plane). A visual preview sphere is rendered at the prospective launch position. If this preview sphere intersects any settled sphere on the table, it renders in a disabled/red state and launches are blocked. On click/tap, the sphere is launched at a fixed power in the direction away from the player. Surface friction determines how far the sphere travels before coming to rest.
 
 Spheres interact physically with each other and with table boundaries. Collisions cause repositioning — spheres can be nudged, deflected, or wedged by subsequent throws. Side boundaries and the far end are solid and bouncing; spheres decelerate against them until coming to a stop.
 
@@ -24,7 +24,7 @@ When two spheres of the same tier make contact, they merge into a single sphere 
 
 ## Loss Condition
 
-A dashed line is rendered near the player's end of the table. If any sphere's position crosses back past this line, the session ends.
+A dashed line is rendered near the player's end of the table. If any active sphere (excluding the sphere currently in the launcher/queue) crosses back past this line and remains there for more than 1.5 seconds, the session ends. This grace period prevents momentary bounces or active launches from triggering premature game-overs.
 
 ---
 
@@ -50,7 +50,7 @@ There are 13 tiers. Each tier corresponds to a spectral color, progressing throu
 
 ### Size Progression
 
-Each tier's radius scales geometrically from the previous tier by a fixed multiplier (target: approximately ×1.3 per tier). This produces a level-13 sphere with roughly 10× the radius of a level-1 sphere. Exact multiplier to be tuned in playtesting.
+Each tier's radius scales geometrically from the previous tier by a fixed multiplier (target: ×1.21 per tier). This mathematically produces a level-13 sphere with exactly 10× the radius of a level-1 sphere ($1.21^{12} \approx 9.85$).
 
 **Table size target:** Large enough that 3–4 level-13 spheres could hypothetically coexist. This creates a tight, tense endgame.
 
@@ -101,14 +101,40 @@ Three scoring components combine into a session total:
 
 ### Stack
 
-|Layer|Technology|
+|Layer|Technology & Version|
 |---|---|
 |Language|Rust|
-|Engine|Bevy (3D)|
-|Physics|Rapier3D|
+|Engine|Bevy 0.18.1 (3D)|
+|Physics|Rapier3D (via bevy_rapier3d 0.34.0)|
 |Rendering|Bevy PBR, isometric orthographic camera|
 |Build target|WASM (via wasm-bindgen / trunk)|
 |Distribution|itch.io|
+
+### Dependencies (Cargo.toml Reference)
+
+To ensure compile-and-run capability on WASM, use the following dependency configurations:
+
+```toml
+[dependencies]
+bevy = { version = "0.18.1", features = ["wayland", "x11"] }
+bevy_rapier3d = { version = "0.34.0", features = ["simd"] }
+rand = "0.9"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[profile.release]
+opt-level = 'z'
+lto = true
+codegen-units = 1
+```
+
+A `.cargo/config.toml` is required for WASM randomness compilation:
+
+```toml
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", 'getrandom_backend="wasm_js"']
+```
 
 ### Physics Notes
 
@@ -120,8 +146,8 @@ Three scoring components combine into a session total:
 ### Sphere Rendering
 
 - 3D sphere meshes with PBR material; base color corresponds to tier color
-- Tier number rendered as a texture overlay on the sphere surface
-- Colorblind mode: high-contrast number labels become primary visual indicator
+- Tier number rendered as a child entity text label (e.g. via a Billboard or Camera-facing 2D Text node) positioned slightly above the sphere. Rotational constraints keep the label flat and fully readable from the camera's isometric viewpoint, avoiding texture-wrapping complexity.
+- Colorblind mode: high-contrast number labels become the primary visual indicator (rendered in black/white with high opacity).
 
 ---
 
@@ -169,6 +195,7 @@ let linear_damping = 1.5;     // High damping: simulates table drag so balls set
 ### Merge Resolution Algorithm
 
 - **Positioning:** A merged sphere must spawn at the exact midpoint between the two parent spheres.
+- **Physics & Momentum:** The merged sphere inherits the sum of both parent spheres' linear momentum scaled by `0.5` to simulate inelastic merging loss. This provides a satisfying physical response without excessive post-merge speed.
 - **Immediate Deletion:** If a merged sphere matches the current Order Tier, it must trigger an item-collected particle/UI event and be despawned from the physics world at the end of the current frame, before the next physics tick.
 - **Tie-Breaking:** If a newly spawned sphere overlaps multiple valid same-tier spheres simultaneously, it must merge with the closest one first.
 
@@ -176,7 +203,7 @@ let linear_damping = 1.5;     // High damping: simulates table drag so balls set
 
 To ensure the project compiles and runs immediately, use the following initial values:
 
-- **Radius Multiplier:** `1.3` (Tier 1 radius = `0.5` units).
+- **Radius Multiplier:** `1.21` (Tier 1 radius = `0.5` units, Tier 13 radius = `4.92` units).
 - **Spawn Weights (Tiers 1-5):** Tier 1: 35%, Tier 2: 30%, Tier 3: 20%, Tier 4: 10%, Tier 5: 5%.
 - **Initial Orders Pool:** Tiers 3 through 6.
 - **Scoring:** `Points = Resulting_Tier * 100`. Order Completion Bonus = `Target_Tier * 500`.
