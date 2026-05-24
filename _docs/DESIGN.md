@@ -107,8 +107,12 @@ Three scoring components combine into a session total:
 |Engine|Bevy 0.18.1 (3D)|
 |Physics|Rapier3D (via bevy_rapier3d 0.34.0)|
 |Rendering|Bevy PBR, isometric orthographic camera|
-|Build target|WASM (via wasm-bindgen / trunk)|
-|Distribution|itch.io|
+|Build target|WASM (via wasm-bindgen / trunk) & Native Desktop (macOS, Windows, Linux)|
+|Distribution|itch.io (via GitHub -> itch.io distribution pipeline)|
+
+### Distribution Pipeline
+
+While the primary target is Web (WASM) for easy browser-based playtesting, the game is natively cross-compatible. Eventual distribution of native downloadable releases (macOS, Windows, Linux) will be handled via GitHub Actions CI/CD. The pipeline will automatically compile release binaries on OS-specific virtual runners and deploy them directly to itch.io using the `butler` publishing tool.
 
 ### Dependencies (Cargo.toml Reference)
 
