@@ -38,9 +38,21 @@ fn main() {
 
 /// Camera and lighting only — scene geometry is handled by VisualPlugin.
 fn setup_camera_and_light(mut commands: Commands) {
+    // 3D perspective camera for the game scene.
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 15.0, 18.0).looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::Y),
+    ));
+
+    // 2D orthographic camera for Text2d overlay labels.
+    // Renders on top of the 3D camera (order 1 > order 0).
+    commands.spawn((
+        Camera2d,
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
     ));
 
     commands.spawn((

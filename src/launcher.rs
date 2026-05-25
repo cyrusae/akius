@@ -46,7 +46,7 @@ impl Plugin for LauncherPlugin {
 
 /// Updates the aiming position by raycasting the screen cursor coordinates onto the Y=0 plane
 pub fn update_launcher_aiming(
-    camera_query: Query<(&Camera, &GlobalTransform)>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window>,
     settings: Res<GameSettings>,
     dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,

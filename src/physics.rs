@@ -70,6 +70,7 @@ pub fn spawn_sphere_entity<'a>(
             | LockedAxes::ROTATION_LOCKED_X
             | LockedAxes::ROTATION_LOCKED_Y
             | LockedAxes::ROTATION_LOCKED_Z,
+        Visibility::default(),
     ));
     cmd
 }
@@ -116,7 +117,7 @@ pub fn resolve_merges(
         if let (Ok((s1, t1, v1)), Ok((s2, t2, v2))) = (sphere_query.get(e1), sphere_query.get(e2)) {
             if s1.tier == s2.tier {
                 let current_tier = s1.tier;
-                if current_tier >= 13 {
+                if current_tier >= 10 {
                     continue; // Maximum tier achieved, cannot merge further
                 }
 

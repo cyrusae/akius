@@ -217,7 +217,7 @@ fn update_next_sphere_hud(
     mut text_query: Query<&mut Text, With<NextSpherePreviewText>>,
 ) {
     let Some(queue) = queue else { return; };
-    let idx = (queue.next as usize).saturating_sub(1).min(12);
+    let idx = (queue.next as usize).saturating_sub(1).min(9);
 
     let color = TIER_COLORS[idx];
 

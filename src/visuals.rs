@@ -6,22 +6,19 @@ use crate::launcher::LauncherPreview;
 
 // ---------------------------------------------------------------------------
 // Tier color palette — warm perceptual gradient, violet → sky blue → lime →
-// orange → gold, designed to be distinct across 13 steps.
+// orange → gold, designed to be distinct across 10 steps.
 // ---------------------------------------------------------------------------
-pub const TIER_COLORS: [Color; 13] = [
+pub const TIER_COLORS: [Color; 10] = [
     Color::hsl(270.0, 0.70, 0.55), // Tier  1 — violet
-    Color::hsl(240.0, 0.65, 0.60), // Tier  2 — indigo-blue
-    Color::hsl(210.0, 0.70, 0.58), // Tier  3 — sky blue
-    Color::hsl(180.0, 0.65, 0.50), // Tier  4 — cyan
-    Color::hsl(150.0, 0.60, 0.48), // Tier  5 — teal-green
-    Color::hsl(120.0, 0.60, 0.45), // Tier  6 — lime green
-    Color::hsl( 90.0, 0.62, 0.48), // Tier  7 — yellow-green
-    Color::hsl( 60.0, 0.72, 0.50), // Tier  8 — yellow
-    Color::hsl( 40.0, 0.80, 0.53), // Tier  9 — amber
-    Color::hsl( 25.0, 0.85, 0.52), // Tier 10 — orange
-    Color::hsl( 10.0, 0.80, 0.52), // Tier 11 — red-orange
-    Color::hsl(  0.0, 0.75, 0.52), // Tier 12 — red
-    Color::hsl( 45.0, 0.90, 0.55), // Tier 13 — gold (max)
+    Color::hsl(225.0, 0.65, 0.60), // Tier  2 — blue
+    Color::hsl(195.0, 0.70, 0.55), // Tier  3 — sky blue
+    Color::hsl(165.0, 0.65, 0.50), // Tier  4 — teal
+    Color::hsl(120.0, 0.60, 0.45), // Tier  5 — green
+    Color::hsl( 80.0, 0.65, 0.48), // Tier  6 — yellow-green
+    Color::hsl( 50.0, 0.80, 0.52), // Tier  7 — amber
+    Color::hsl( 20.0, 0.85, 0.52), // Tier  8 — orange
+    Color::hsl(  0.0, 0.78, 0.52), // Tier  9 — red
+    Color::hsl( 45.0, 0.90, 0.55), // Tier 10 — gold (max)
 ];
 
 // ---------------------------------------------------------------------------
@@ -32,9 +29,13 @@ pub const TIER_COLORS: [Color; 13] = [
 #[derive(Component)]
 pub struct SphereVisual;
 
-/// Tag on the billboard 3D/2D text child entity of a `Sphere` entity.
+/// Tag on a root-level Text2d label entity. Stores the sphere entity it follows.
 #[derive(Component)]
-pub struct BillboardLabel;
+pub struct BillboardLabel(pub Entity);
+
+/// Tag on a root-level Text2d label entity for the launcher preview sphere.
+#[derive(Component)]
+pub struct PreviewLabel;
 
 // ---------------------------------------------------------------------------
 // Resources
@@ -43,10 +44,10 @@ pub struct BillboardLabel;
 /// Pre-built material handles for each tier.
 #[derive(Resource)]
 pub struct TierMaterials {
-    pub normal: [Handle<StandardMaterial>; 13],
+    pub normal: [Handle<StandardMaterial>; 10],
 }
 
-/// Build all 13 tier materials.
+/// Build all 10 tier materials.
 fn build_tier_materials(
     materials: &mut Assets<StandardMaterial>,
 ) -> TierMaterials {
@@ -63,14 +64,13 @@ fn build_tier_materials(
     TierMaterials { normal }
 }
 
-/// Return the correct material handle for a tier (1-indexed) given the current
-/// colorblind mode.
+/// Return the correct material handle for a tier (1-indexed).
 pub fn material_for_tier(
     tier: u8,
     _colorblind: bool,
     tier_mats: &TierMaterials,
 ) -> Handle<StandardMaterial> {
-    let idx = (tier as usize).saturating_sub(1).min(12);
+    let idx = (tier as usize).saturating_sub(1).min(9);
     tier_mats.normal[idx].clone()
 }
 
@@ -91,11 +91,13 @@ impl Plugin for VisualPlugin {
                 Update,
                 (
                     update_preview_material,
-                    update_billboards,
+                    update_preview_label,
+                    update_labels_screen_position,
                     handle_keyboard_colorblind_toggle,
                     update_billboard_visibility,
                     animate_merged_spawns,
                     animate_fulfilling_spheres,
+                    cleanup_orphaned_labels,
                 ),
             )
             // Observer: fires whenever a Sphere component is added to any entity
@@ -161,7 +163,6 @@ fn setup_visuals(
     ));
 
     // ---- Back wall ----
-    // Located at the far end of the floor (settings.launcher_z - depth)
     commands.spawn((
         Name::new("Wall Back"),
         Mesh3d(meshes.add(Cuboid::new(settings.arena_width + 0.4, wh, 0.2))),
@@ -171,7 +172,6 @@ fn setup_visuals(
     ));
 
     // ---- Dashed loss-boundary line ----
-    // A row of small flat cubes across the arena width at loss_boundary_z.
     let dash_mat = materials.add(StandardMaterial {
         base_color: Color::hsl(0.0, 0.85, 0.55),
         emissive: LinearRgba::new(0.6, 0.05, 0.05, 1.0),
@@ -196,8 +196,6 @@ fn setup_visuals(
     }
 
     // ---- Launcher preview sphere ----
-    // Starts with tier-1 material; updated each frame by update_preview_material.
-    // Mesh is created with unit size (1.0) so it scales perfectly to true sphere size.
     commands.spawn((
         Name::new("Launcher Preview"),
         LauncherPreview,
@@ -211,10 +209,25 @@ fn setup_visuals(
         Transform::from_xyz(0.0, 0.0, settings.launcher_z),
         Visibility::Visible,
     ));
+
+    // ---- Preview label ----
+    commands.spawn((
+        PreviewLabel,
+        Text2d::new("1"),
+        TextFont {
+            font_size: 22.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        TextLayout::new_with_justify(Justify::Center),
+        bevy::text::LineHeight::Px(22.0),
+        Transform::from_xyz(0.0, 0.0, 10.0),
+        Visibility::Hidden,
+    ));
 }
 
 // ---------------------------------------------------------------------------
-// Observer — attach mesh + material when a Sphere component is added
+// Observer — attach visual mesh and spawn root-level 2D label
 // ---------------------------------------------------------------------------
 
 fn on_sphere_added(
@@ -230,13 +243,10 @@ fn on_sphere_added(
     let Some(tier_mats) = tier_mats else { return; };
     let cb = colorblind.map(|r| r.0).unwrap_or(false);
     let radius = get_radius(sphere.tier);
-    let mat    = material_for_tier(sphere.tier, cb, &tier_mats);
+    let mat    = material_for_tier(sphere.tier, false, &tier_mats);
     let mesh   = meshes.add(bevy::math::primitives::Sphere::new(radius).mesh().uv(32, 18));
-    let initial_visibility = if cb {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
+
+    let initial_visibility = if cb { Visibility::Visible } else { Visibility::Hidden };
 
     // Spawn 3D visual mesh child entity offset by radius in Y
     commands.entity(entity).with_children(|parent| {
@@ -246,21 +256,22 @@ fn on_sphere_added(
             SphereVisual,
             Transform::from_xyz(0.0, radius, 0.0),
         ));
-
-        // Spawn 2D billboard text child entity above the sphere
-        parent.spawn((
-            BillboardLabel,
-            Text2d::new(sphere.tier.to_string()),
-            TextFont {
-                font_size: 40.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Transform::from_xyz(0.0, radius * 2.0 + 0.15, 0.0)
-                .with_scale(Vec3::splat(0.025)),
-            initial_visibility,
-        ));
     });
+
+    // Spawn a root-level 2D text label that will be screen-projected on top of 3D
+    commands.spawn((
+        BillboardLabel(entity),
+        Text2d::new(sphere.tier.to_string()),
+        TextFont {
+            font_size: 22.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        TextLayout::new_with_justify(Justify::Center),
+        bevy::text::LineHeight::Px(22.0),
+        Transform::from_xyz(0.0, 0.0, 10.0), // Z coordinate in 2D space
+        initial_visibility,
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -280,15 +291,91 @@ fn update_preview_material(
     *mat_handle = MeshMaterial3d(material_for_tier(queue.current, cb, &tier_mats));
 }
 
-// Rotate all billboard labels to face the camera.
-fn update_billboards(
-    camera_query: Query<&GlobalTransform, With<Camera3d>>,
-    mut billboard_query: Query<&mut Transform, With<BillboardLabel>>,
+// Project each label's tracked sphere from 3D world space to 2D screen space.
+fn update_labels_screen_position(
+    sphere_query: Query<(&Transform, &Sphere)>,
+    mut label_query: Query<(&BillboardLabel, &mut Transform), Without<Sphere>>,
+    camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: Query<&Window>,
 ) {
-    let Ok(camera_global_transform) = camera_query.single() else { return; };
-    let camera_rotation = camera_global_transform.compute_transform().rotation;
-    for mut transform in billboard_query.iter_mut() {
-        transform.rotation = camera_rotation;
+    let Ok((camera, cam_transform)) = camera_3d_query.single() else { return; };
+    let Ok(window) = window_query.single() else { return; };
+    let win_w = window.width();
+    let win_h = window.height();
+
+    for (label, mut label_transform) in label_query.iter_mut() {
+        if let Ok((sphere_transform, sphere)) = sphere_query.get(label.0) {
+            let radius = get_radius(sphere.tier);
+            // Project the point above the sphere center in world space
+            let world_pos = sphere_transform.translation + Vec3::Y * (radius + 0.15);
+            if let Some(ndc) = camera.world_to_ndc(cam_transform, world_pos) {
+                if ndc.z < 0.0 || ndc.z > 1.0 {
+                    continue; // Behind camera
+                }
+                // NDC [-1,1] → screen pixels (origin at center for Camera2d)
+                let screen_x = ndc.x * win_w * 0.5;
+                let screen_y = ndc.y * win_h * 0.5;
+                label_transform.translation.x = screen_x;
+                label_transform.translation.y = screen_y;
+            }
+        }
+    }
+}
+
+// Track and project the launcher preview label onto the launcher preview sphere.
+fn update_preview_label(
+    queue: Option<Res<DispenserQueue>>,
+    colorblind: Option<Res<ColorblindMode>>,
+    camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    preview_query: Query<&Transform, With<LauncherPreview>>,
+    mut label_query: Query<(&mut Text2d, &mut Transform, &mut Visibility), (With<PreviewLabel>, Without<LauncherPreview>)>,
+    window_query: Query<&Window>,
+) {
+    let (Some(queue), Some(colorblind)) = (queue, colorblind) else { return; };
+    let Ok(preview_transform) = preview_query.single() else { return; };
+    let Ok((mut text, mut label_transform, mut visibility)) = label_query.single_mut() else { return; };
+
+    // Update text
+    let new_text = queue.current.to_string();
+    if text.0 != new_text {
+        text.0 = new_text;
+    }
+
+    // Toggle visibility based on colorblind mode
+    let target_visibility = if colorblind.0 { Visibility::Visible } else { Visibility::Hidden };
+    if *visibility != target_visibility {
+        *visibility = target_visibility;
+    }
+
+    // Project coordinates
+    if colorblind.0 {
+        let Ok((camera, cam_transform)) = camera_3d_query.single() else { return; };
+        let Ok(window) = window_query.single() else { return; };
+        let win_w = window.width();
+        let win_h = window.height();
+
+        let world_pos = preview_transform.translation;
+        if let Some(ndc) = camera.world_to_ndc(cam_transform, world_pos) {
+            if ndc.z >= 0.0 && ndc.z <= 1.0 {
+                let screen_x = ndc.x * win_w * 0.5;
+                let screen_y = ndc.y * win_h * 0.5;
+                label_transform.translation.x = screen_x;
+                label_transform.translation.y = screen_y;
+            }
+        }
+    }
+}
+
+// Despawn label entities whose sphere has already been despawned.
+fn cleanup_orphaned_labels(
+    mut commands: Commands,
+    label_query: Query<(Entity, &BillboardLabel)>,
+    sphere_query: Query<Entity, With<Sphere>>,
+) {
+    for (label_entity, label) in label_query.iter() {
+        if sphere_query.get(label.0).is_err() {
+            commands.entity(label_entity).despawn();
+        }
     }
 }
 
@@ -302,12 +389,11 @@ fn handle_keyboard_colorblind_toggle(
     }
 }
 
-
 pub fn animate_merged_spawns(
     cooldown_query: Query<&crate::physics::MergeCooldown>,
     fulfilling_query: Query<&crate::game_state::Fulfilling>,
     mut visual_query: Query<(&ChildOf, &mut Transform), With<SphereVisual>>,
-    mut billboard_query: Query<(&ChildOf, &mut Transform), (With<BillboardLabel>, Without<SphereVisual>)>,
+    mut label_query: Query<(&BillboardLabel, &mut Transform), Without<SphereVisual>>,
 ) {
     for (child_of, mut transform) in visual_query.iter_mut() {
         let parent = child_of.0;
@@ -326,8 +412,8 @@ pub fn animate_merged_spawns(
             }
         }
     }
-    for (child_of, mut transform) in billboard_query.iter_mut() {
-        let parent = child_of.0;
+    for (label, mut transform) in label_query.iter_mut() {
+        let parent = label.0;
         if fulfilling_query.contains(parent) {
             continue; // Skip fulfilling spheres
         }
@@ -336,10 +422,10 @@ pub fn animate_merged_spawns(
             let duration = cooldown.timer.duration().as_secs_f32();
             let t = (elapsed / duration).clamp(0.0, 1.0);
             let scale = 0.8 + t * 0.2;
-            transform.scale = Vec3::splat(0.025 * scale);
+            transform.scale = Vec3::splat(scale);
         } else {
-            if transform.scale != Vec3::splat(0.025) {
-                transform.scale = Vec3::splat(0.025);
+            if transform.scale != Vec3::ONE {
+                transform.scale = Vec3::ONE;
             }
         }
     }
@@ -348,7 +434,7 @@ pub fn animate_merged_spawns(
 pub fn animate_fulfilling_spheres(
     fulfillment: Option<Res<crate::game_state::ActiveFulfillment>>,
     mut visual_query: Query<(&ChildOf, &mut Transform), With<SphereVisual>>,
-    mut billboard_query: Query<(&ChildOf, &mut Transform), (With<BillboardLabel>, Without<SphereVisual>)>,
+    mut label_query: Query<(&BillboardLabel, &mut Transform), Without<SphereVisual>>,
 ) {
     let Some(fulfillment) = fulfillment else { return; };
     if let Some(fulfilling_entity) = fulfillment.entity {
@@ -374,9 +460,9 @@ pub fn animate_fulfilling_spheres(
                 transform.scale = Vec3::splat(scale);
             }
         }
-        for (child_of, mut transform) in billboard_query.iter_mut() {
-            if child_of.0 == fulfilling_entity {
-                transform.scale = Vec3::splat(0.025 * scale);
+        for (label, mut transform) in label_query.iter_mut() {
+            if label.0 == fulfilling_entity {
+                transform.scale = Vec3::splat(scale);
             }
         }
     }

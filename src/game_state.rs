@@ -140,8 +140,8 @@ pub fn check_order_fulfillment(
             score.completed_orders += 1;
 
             // Assign a new order using the scaling formula (starting at Tier 6)
-            let min_tier = (6 + score.completed_orders / 2).min(11);
-            let max_tier = (min_tier + 1 + (score.completed_orders % 2)).min(13);
+            let min_tier = (6 + score.completed_orders / 2).min(8);
+            let max_tier = (min_tier + 1 + (score.completed_orders % 2)).min(10);
             active_order.target_tier = rand::random_range(min_tier as u8..=max_tier as u8);
 
             // Finish fulfillment
