@@ -24,6 +24,20 @@ pub struct LossTracker {
 #[derive(Resource, Clone)]
 pub struct GameSettings {
     pub loss_boundary_z: f32,
+    pub launcher_z: f32,
+    pub arena_width: f32,
+    pub launch_speed: f32,
+}
+
+impl Default for GameSettings {
+    fn default() -> Self {
+        Self {
+            loss_boundary_z: 10.0,
+            launcher_z: 12.0,
+            arena_width: 8.0,
+            launch_speed: 15.0,
+        }
+    }
 }
 
 #[derive(Resource, Default, Clone)]
@@ -108,6 +122,7 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         app.insert_resource(GameSettings {
             loss_boundary_z: 10.0,
+            ..default()
         });
         app.add_systems(Update, check_loss_condition);
 
@@ -167,6 +182,7 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         app.insert_resource(GameSettings {
             loss_boundary_z: 10.0,
+            ..default()
         });
         app.add_systems(Update, check_loss_condition);
 
@@ -200,6 +216,7 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         app.insert_resource(GameSettings {
             loss_boundary_z: 10.0,
+            ..default()
         });
         app.add_systems(Update, check_loss_condition);
 
