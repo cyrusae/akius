@@ -171,6 +171,46 @@ pub fn check_order_fulfillment(
     }
 }
 
+fn despawn_recursive_custom(
+    commands: &mut Commands,
+    entity: Entity,
+    children_query: &Query<&Children>,
+) {
+    if let Ok(children) = children_query.get(entity) {
+        for child in children.iter() {
+            despawn_recursive_custom(commands, child, children_query);
+        }
+    }
+    commands.entity(entity).despawn();
+}
+
+pub fn reset_game_state(
+    mut commands: Commands,
+    mut score: ResMut<Score>,
+    mut active_order: ResMut<ActiveOrder>,
+    mut queue: ResMut<DispenserQueue>,
+    mut fulfillment: ResMut<ActiveFulfillment>,
+    sphere_query: Query<Entity, With<Sphere>>,
+    children_query: Query<&Children>,
+) {
+    // Despawn all gameplay spheres
+    for entity in sphere_query.iter() {
+        despawn_recursive_custom(&mut commands, entity, &children_query);
+    }
+
+    // Reset game resources to initial values
+    score.total = 0;
+    score.peak_tier = 0;
+    score.completed_orders = 0;
+
+    active_order.target_tier = 6;
+
+    queue.current = 1;
+    queue.next = 2;
+
+    *fulfillment = ActiveFulfillment::default();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

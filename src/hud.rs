@@ -20,6 +20,9 @@ pub struct ColorblindButton;
 #[derive(Component)]
 pub struct ColorblindButtonText;
 
+#[derive(Component)]
+pub struct GameOverScreen;
+
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
@@ -35,7 +38,10 @@ impl Plugin for HudPlugin {
                     handle_colorblind_button,
                     update_colorblind_button_text,
                 ),
-            );
+            )
+            .add_systems(OnEnter(crate::game_state::AppState::GameOver), spawn_game_over_screen)
+            .add_systems(OnExit(crate::game_state::AppState::GameOver), despawn_game_over_screen)
+            .add_systems(Update, handle_restart_input.run_if(in_state(crate::game_state::AppState::GameOver)));
     }
 }
 
@@ -265,5 +271,85 @@ fn update_colorblind_button_text(
         if let Ok(mut text) = query.single_mut() {
             text.0 = format!("Numbers: {}", if colorblind.0 { "ON" } else { "OFF" });
         }
+    }
+}
+
+fn spawn_game_over_screen(
+    mut commands: Commands,
+    score: Res<Score>,
+) {
+    commands.spawn((
+        GameOverScreen,
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            position_type: PositionType::Absolute,
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(20.0),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
+        ZIndex(100),
+    )).with_children(|parent| {
+        parent.spawn((
+            Text::new("FATAL: board.overflow"),
+            TextFont {
+                font_size: 40.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.9, 0.1, 0.1)),
+        ));
+
+        parent.spawn((
+            Text::new(format!("final.score = {:06}", score.total)),
+            TextFont {
+                font_size: 32.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.1, 0.9, 0.1)),
+        ));
+
+        parent.spawn((
+            Text::new("[ press space to restart ]"),
+            TextFont {
+                font_size: 20.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.5, 0.8, 0.5)),
+        ));
+    });
+}
+
+fn despawn_recursive_custom(
+    commands: &mut Commands,
+    entity: Entity,
+    children_query: &Query<&Children>,
+) {
+    if let Ok(children) = children_query.get(entity) {
+        for child in children.iter() {
+            despawn_recursive_custom(commands, child, children_query);
+        }
+    }
+    commands.entity(entity).despawn();
+}
+
+fn despawn_game_over_screen(
+    mut commands: Commands,
+    query: Query<Entity, With<GameOverScreen>>,
+    children_query: Query<&Children>,
+) {
+    for entity in query.iter() {
+        despawn_recursive_custom(&mut commands, entity, &children_query);
+    }
+}
+
+fn handle_restart_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<crate::game_state::AppState>>,
+) {
+    if keyboard.just_pressed(KeyCode::Space) {
+        next_state.set(crate::game_state::AppState::MainMenu);
     }
 }

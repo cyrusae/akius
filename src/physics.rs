@@ -29,9 +29,9 @@ impl Plugin for PhysicsPlugin {
                 resolve_merges,
                 tick_merge_cooldowns,
                 handle_despawn_delay,
-                dampen_rebound_velocity
+                spill_spheres,
             ).chain())
-            .add_systems(Update, spill_spheres_on_game_over.run_if(in_state(crate::game_state::AppState::GameOver)));
+            .add_systems(OnEnter(crate::game_state::AppState::GameOver), unlock_all_spheres_on_game_over);
     }
 }
 
@@ -228,37 +228,34 @@ pub fn tick_merge_cooldowns(
 }
 
 /// Dampens positive Z-velocity (upward movement towards the player) 
-/// using an intensifying gradient that starts at the 1/10-1/8 mark (Z > -0.5).
-pub fn dampen_rebound_velocity(
-    mut query: Query<(&Transform, &mut Velocity), With<Sphere>>,
+/// Unlocks the Y-translation and all rotations for spheres that go past Z > settings.launcher_z
+/// during gameplay so they visually roll and fall off the edge of the table.
+pub fn spill_spheres(
+    mut commands: Commands,
+    sphere_query: Query<(Entity, &Transform, Option<&LockedAxes>), With<Sphere>>,
+    settings: Option<Res<crate::game_state::GameSettings>>,
 ) {
-    for (transform, mut velocity) in query.iter_mut() {
-        if velocity.linear.z > 0.0 {
-            if transform.translation.z > -0.5 {
-                // Calculate how far past the 1/10-1/8 mark the sphere is (clamped between 0.0 and 1.0 over a 11.0 unit range)
-                let t = ((transform.translation.z - (-0.5)) / 11.0).clamp(0.0, 1.0);
-                // Damping factor starts at 1.0 (no damping) and drops to 0.60 (very heavy damping)
-                let damping = 1.0 - t * 0.40;
-                velocity.linear.z *= damping;
+    let launcher_z = settings.map(|s| s.launcher_z).unwrap_or(12.0);
+    for (entity, transform, locked_axes) in sphere_query.iter() {
+        if transform.translation.z > launcher_z {
+            if let Some(axes) = locked_axes {
+                if *axes != LockedAxes::empty() {
+                    // Setting LockedAxes::empty() ensures Rapier registers the change and unlocks the axes
+                    commands.entity(entity).insert(LockedAxes::empty());
+                }
             }
         }
     }
 }
 
-/// Unlocks the Y-translation and all rotations for spheres that go past Z > settings.launcher_z
-/// when the game transitions to AppState::GameOver.
-pub fn spill_spheres_on_game_over(
+/// Unlocks the Y-translation and all rotations for all active spheres on the board
+/// when the game transitions to AppState::GameOver, causing a complete cascade cascade.
+pub fn unlock_all_spheres_on_game_over(
     mut commands: Commands,
-    sphere_query: Query<(Entity, &Transform, Option<&LockedAxes>), With<Sphere>>,
-    settings: Res<crate::game_state::GameSettings>,
+    sphere_query: Query<Entity, With<Sphere>>,
 ) {
-    for (entity, transform, locked_axes) in sphere_query.iter() {
-        if transform.translation.z > settings.launcher_z {
-            if locked_axes.is_some() {
-                // Remove LockedAxes component to let the sphere fall and tumble off the edge
-                commands.entity(entity).remove::<LockedAxes>();
-            }
-        }
+    for entity in sphere_query.iter() {
+        commands.entity(entity).insert(LockedAxes::empty());
     }
 }
 
