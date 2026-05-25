@@ -14,7 +14,7 @@ pub struct PhysicsPlugin;
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MergeEvent>()
-            .add_systems(Update, (detect_collisions, resolve_merges).chain());
+            .add_systems(Update, (detect_collisions, resolve_merges, dampen_rebound_velocity).chain());
     }
 }
 
@@ -32,12 +32,16 @@ pub fn spawn_sphere_entity<'a>(
         RigidBody::Dynamic,
         Collider::ball(radius),
         Restitution {
-            coefficient: 0.3,
-            combine_rule: CoefficientCombineRule::Min,
+            coefficient: 0.15,
+            combine_rule: CoefficientCombineRule::Max,
         },
         Friction {
             coefficient: 0.5,
             combine_rule: CoefficientCombineRule::Average,
+        },
+        Damping {
+            linear_damping: 0.6,
+            angular_damping: 0.0,
         },
         Velocity {
             linear: velocity,
@@ -123,6 +127,24 @@ pub fn resolve_merges(
     }
 }
 
+/// Dampens positive Z-velocity (upward movement towards the player) 
+/// using an intensifying gradient that starts at the 1/4 mark (Z > 1.5).
+pub fn dampen_rebound_velocity(
+    mut query: Query<(&Transform, &mut Velocity), With<Sphere>>,
+) {
+    for (transform, mut velocity) in query.iter_mut() {
+        if velocity.linear.z > 0.0 {
+            if transform.translation.z > 1.5 {
+                // Calculate how far past the 1/4 mark the sphere is (clamped between 0.0 and 1.0 over a 8.0 unit range)
+                let t = ((transform.translation.z - 1.5) / 8.0).clamp(0.0, 1.0);
+                // Damping factor starts at 1.0 (no damping) and drops to 0.75 (heavy damping)
+                let damping = 1.0 - t * 0.25;
+                velocity.linear.z *= damping;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,7 +190,7 @@ mod tests {
             .entity(entity)
             .get::<Restitution>()
             .expect("Missing Restitution");
-        assert_eq!(restitution.coefficient, 0.3);
+        assert_eq!(restitution.coefficient, 0.15);
 
         let friction = world
             .entity(entity)

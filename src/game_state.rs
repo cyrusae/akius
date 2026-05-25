@@ -26,6 +26,8 @@ pub struct GameSettings {
     pub loss_boundary_z: f32,
     pub launcher_z: f32,
     pub arena_width: f32,
+    pub arena_depth: f32,
+    pub wall_height: f32,
     pub launch_speed: f32,
 }
 
@@ -35,10 +37,16 @@ impl Default for GameSettings {
             loss_boundary_z: 10.0,
             launcher_z: 12.0,
             arena_width: 8.0,
+            arena_depth: 14.0,
+            wall_height: 1.5,
             launch_speed: 15.0,
         }
     }
 }
+
+/// Whether the colorblind-friendly sphere pattern overlay is active.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ColorblindMode(pub bool);
 
 #[derive(Resource, Default, Clone)]
 pub struct Score {

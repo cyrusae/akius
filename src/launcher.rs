@@ -98,6 +98,7 @@ pub fn check_launcher_obstructions(
     dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
     mut launcher_state: ResMut<LauncherState>,
     rapier_context: ReadRapierContext,
+    sphere_query: Query<&Sphere>,
 ) {
     let Ok(context) = rapier_context.single() else {
         return;
@@ -116,9 +117,12 @@ pub fn check_launcher_obstructions(
         Quat::IDENTITY,
         shape,
         QueryFilter::default(),
-        |_entity| {
-            obstructed = true;
-            false
+        |entity| {
+            if sphere_query.contains(entity) {
+                obstructed = true;
+                return false; // Stop iterating
+            }
+            true // Continue checking other collisions
         },
     );
 
@@ -171,12 +175,19 @@ pub fn update_launcher_preview_visuals(
         return;
     };
 
-    transform.translation = Vec3::new(launcher_state.active_x, 0.0, settings.launcher_z);
-    *visibility = Visibility::Visible;
-
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
     let radius = crate::core_math::get_radius(current_tier);
+
+    transform.translation = Vec3::new(launcher_state.active_x, radius, settings.launcher_z);
     transform.scale = Vec3::splat(radius);
+
+    // Hide preview sphere during the first part of the cooldown for a smoother spawning feel
+    let elapsed = launcher_state.cooldown_timer.elapsed_secs();
+    if !launcher_state.cooldown_timer.is_finished() && elapsed < 0.4 {
+        *visibility = Visibility::Hidden;
+    } else {
+        *visibility = Visibility::Visible;
+    }
 }
 
 #[cfg(test)]
