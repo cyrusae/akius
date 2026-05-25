@@ -213,3 +213,17 @@ To ensure the project compiles and runs immediately, use the following initial v
 - **Scoring:** `Points = Resulting_Tier * 100`. Order Completion Bonus = `Target_Tier * 500`.
 
 Do these values sound wrong based on the design document? Stop to discuss with the user and explain what you would want to change and why.
+
+---
+
+## Future Enhancements: Hakius Mode (Hard Mode)
+
+Inspired by *Hatetris*, "Hakius Mode" is an intended post-launch hard mode that programmatically dispenses the worst possible sphere tier to the player.
+
+### Implementation Concept
+Rather than using random spawn weights, the dispenser selects the next sphere dynamically based on lookahead physics simulations:
+
+1. **Cloned Physics State**: Once the previous sphere settles, the game engine clones the current Rapier3D physics world state.
+2. **Headless Simulations**: For each of the 5 eligible spawn tiers ($T_1 \dots T_5$), the game simulates launches across a discretized set of lanes (e.g., 20 lanes across the table's width) in headless, accelerated loops until the physics settles.
+3. **Minimax Selection**: For each tier, the player's optimal shot (minimizing board severity, clutter, and loss proximity) is computed. The game then dispenses the tier that has the *highest* optimal severity score—ensuring the player is given the piece that harms their board state the most even under perfect play.
+4. **Optimization**: Since this is computed once per turn (upon settling, before updating the queue preview), it can be run on a background thread over a few milliseconds without affecting render frames.
