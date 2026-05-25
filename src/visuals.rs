@@ -30,9 +30,7 @@ pub const TIER_COLORS: [Color; 13] = [
 
 /// Tag on the mesh child entity attached to a physics `Sphere` entity.
 #[derive(Component)]
-pub struct SphereVisual {
-    pub tier: u8,
-}
+pub struct SphereVisual;
 
 /// Tag on the billboard 3D/2D text child entity of a `Sphere` entity.
 #[derive(Component)]
@@ -42,19 +40,16 @@ pub struct BillboardLabel;
 // Resources
 // ---------------------------------------------------------------------------
 
-/// Pre-built material handles for each tier, in both normal and colorblind
-/// modes. Rebuilt whenever `ColorblindMode` is toggled.
+/// Pre-built material handles for each tier.
 #[derive(Resource)]
 pub struct TierMaterials {
     pub normal: [Handle<StandardMaterial>; 13],
-    pub colorblind: [Handle<StandardMaterial>; 13],
 }
 
-/// Build all 13 tier materials in normal and colorblind variants.
+/// Build all 13 tier materials.
 fn build_tier_materials(
     materials: &mut Assets<StandardMaterial>,
 ) -> TierMaterials {
-    // Normal — emissive-tinted PBR spheres matching the tier palette.
     let normal = std::array::from_fn(|i| {
         let color = TIER_COLORS[i];
         materials.add(StandardMaterial {
@@ -65,21 +60,7 @@ fn build_tier_materials(
             ..default()
         })
     });
-
-    // Colorblind — high-contrast desaturated palette; the tier number label
-    // becomes the primary identifier. We use a simple grey-scale ramp here as
-    // a placeholder until per-tier pattern textures are added in Phase 6.2.
-    let colorblind = std::array::from_fn(|i| {
-        let t = i as f32 / 12.0; // 0.0 .. 1.0
-        let lightness = 0.20 + t * 0.60; // dark-grey → near-white
-        materials.add(StandardMaterial {
-            base_color: Color::hsl(0.0, 0.0, lightness),
-            perceptual_roughness: 0.6,
-            ..default()
-        })
-    });
-
-    TierMaterials { normal, colorblind }
+    TierMaterials { normal }
 }
 
 /// Return the correct material handle for a tier (1-indexed) given the current
@@ -112,7 +93,6 @@ impl Plugin for VisualPlugin {
                     update_preview_material,
                     update_billboards,
                     handle_keyboard_colorblind_toggle,
-                    update_sphere_materials_on_mode_change,
                     update_billboard_visibility,
                     animate_merged_spawns,
                     animate_fulfilling_spheres,
@@ -263,7 +243,7 @@ fn on_sphere_added(
         parent.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(mat),
-            SphereVisual { tier: sphere.tier },
+            SphereVisual,
             Transform::from_xyz(0.0, radius, 0.0),
         ));
 
@@ -322,19 +302,6 @@ fn handle_keyboard_colorblind_toggle(
     }
 }
 
-// React to ColorblindMode resource changes by updating materials on all existing spheres.
-fn update_sphere_materials_on_mode_change(
-    colorblind: Res<ColorblindMode>,
-    tier_materials: Option<Res<TierMaterials>>,
-    mut sphere_query: Query<(&SphereVisual, &mut MeshMaterial3d<StandardMaterial>)>,
-) {
-    let Some(tier_materials) = tier_materials else { return; };
-    if colorblind.is_changed() {
-        for (visual, mut mat_handle) in sphere_query.iter_mut() {
-            *mat_handle = MeshMaterial3d(material_for_tier(visual.tier, colorblind.0, &tier_materials));
-        }
-    }
-}
 
 pub fn animate_merged_spawns(
     cooldown_query: Query<&crate::physics::MergeCooldown>,
