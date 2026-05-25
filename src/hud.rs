@@ -93,7 +93,7 @@ fn setup_hud(
             )).with_children(|order_panel| {
                 order_panel.spawn((
                     OrderText,
-                    Text::new("Target: Tier 4"),
+                    Text::new("Target: Tier 6"),
                     TextFont {
                         font_size: 24.0,
                         ..default()
@@ -213,21 +213,13 @@ fn update_order_hud(
 
 fn update_next_sphere_hud(
     queue: Option<Res<DispenserQueue>>,
-    colorblind: Option<Res<ColorblindMode>>,
     mut swatch_query: Query<&mut BackgroundColor, With<NextSpherePreviewSwatch>>,
     mut text_query: Query<&mut Text, With<NextSpherePreviewText>>,
 ) {
     let Some(queue) = queue else { return; };
-    let cb = colorblind.map(|r| r.0).unwrap_or(false);
     let idx = (queue.next as usize).saturating_sub(1).min(12);
 
-    let color = if cb {
-        let t = idx as f32 / 12.0;
-        let lightness = 0.20 + t * 0.60;
-        Color::hsl(0.0, 0.0, lightness)
-    } else {
-        TIER_COLORS[idx]
-    };
+    let color = TIER_COLORS[idx];
 
     if let Ok(mut bg) = swatch_query.single_mut() {
         if bg.0 != color {

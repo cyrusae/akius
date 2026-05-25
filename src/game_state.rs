@@ -58,6 +58,7 @@ pub struct ColorblindMode(pub bool);
 pub struct Score {
     pub total: u32,
     pub peak_tier: u8,
+    pub completed_orders: u32,
 }
 
 #[derive(Resource, Clone)]
@@ -135,8 +136,12 @@ pub fn check_order_fulfillment(
                 score.peak_tier = active_order.target_tier;
             }
 
-            // Assign a new order from the initial pool [3, 6]
-            active_order.target_tier = rand::random_range(3..=6);
+            score.completed_orders += 1;
+
+            // Assign a new order using the scaling formula (starting at Tier 6)
+            let min_tier = (6 + score.completed_orders / 2).min(11);
+            let max_tier = (min_tier + 1 + (score.completed_orders % 2)).min(13);
+            active_order.target_tier = rand::random_range(min_tier as u8..=max_tier as u8);
 
             // Finish fulfillment
             fulfillment.entity = None;
@@ -294,6 +299,7 @@ mod tests {
         app.insert_resource(Score {
             total: 0,
             peak_tier: 0,
+            completed_orders: 0,
         });
         app.insert_resource(ActiveOrder { target_tier: 4 });
         app.insert_resource(ActiveFulfillment::default());
@@ -324,9 +330,10 @@ mod tests {
         let score = app.world().resource::<Score>();
         assert_eq!(score.total, 2000);
         assert_eq!(score.peak_tier, 4);
+        assert_eq!(score.completed_orders, 1);
 
-        // ActiveOrder should rotate to new target in initial pool [3, 6]
+        // ActiveOrder should rotate to new target in scaled pool [6, 8] for completed_orders = 1
         let order = app.world().resource::<ActiveOrder>();
-        assert!(order.target_tier >= 3 && order.target_tier <= 6);
+        assert!(order.target_tier >= 6 && order.target_tier <= 8);
     }
 }

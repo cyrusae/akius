@@ -271,6 +271,7 @@ mod tests {
         app.insert_resource(Score {
             total: 0,
             peak_tier: 0,
+            completed_orders: 0,
         });
 
         // Spawn two adjacent Tier 1 spheres
@@ -337,6 +338,7 @@ mod tests {
         app.insert_resource(Score {
             total: 0,
             peak_tier: 0,
+            completed_orders: 0,
         });
 
         let entity_a = spawn_sphere_entity(
@@ -399,6 +401,7 @@ mod tests {
         app.insert_resource(Score {
             total: 0,
             peak_tier: 0,
+            completed_orders: 0,
         });
 
         let entity_a = spawn_sphere_entity(

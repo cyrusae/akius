@@ -86,15 +86,11 @@ fn build_tier_materials(
 /// colorblind mode.
 pub fn material_for_tier(
     tier: u8,
-    colorblind: bool,
+    _colorblind: bool,
     tier_mats: &TierMaterials,
 ) -> Handle<StandardMaterial> {
     let idx = (tier as usize).saturating_sub(1).min(12);
-    if colorblind {
-        tier_mats.colorblind[idx].clone()
-    } else {
-        tier_mats.normal[idx].clone()
-    }
+    tier_mats.normal[idx].clone()
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +113,7 @@ impl Plugin for VisualPlugin {
                     update_billboards,
                     handle_keyboard_colorblind_toggle,
                     update_sphere_materials_on_mode_change,
+                    update_billboard_visibility,
                     animate_merged_spawns,
                     animate_fulfilling_spheres,
                 ),
@@ -255,6 +252,11 @@ fn on_sphere_added(
     let radius = get_radius(sphere.tier);
     let mat    = material_for_tier(sphere.tier, cb, &tier_mats);
     let mesh   = meshes.add(bevy::math::primitives::Sphere::new(radius).mesh().uv(32, 18));
+    let initial_visibility = if cb {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
 
     // Spawn 3D visual mesh child entity offset by radius in Y
     commands.entity(entity).with_children(|parent| {
@@ -276,6 +278,7 @@ fn on_sphere_added(
             TextColor(Color::WHITE),
             Transform::from_xyz(0.0, radius * 2.0 + 0.15, 0.0)
                 .with_scale(Vec3::splat(0.025)),
+            initial_visibility,
         ));
     });
 }
@@ -385,7 +388,19 @@ pub fn animate_fulfilling_spheres(
         let elapsed = fulfillment.timer.elapsed_secs();
         let duration = fulfillment.timer.duration().as_secs_f32();
         let t = (elapsed / duration).clamp(0.0, 1.0);
-        let scale = 1.0 - t;
+        
+        let scale = if t < 0.75 {
+            1.0
+        } else {
+            let t_pop = (t - 0.75) / 0.25; // 0.0 .. 1.0
+            if t_pop < 0.4 {
+                let factor = t_pop / 0.4;
+                1.0 + factor * 0.15
+            } else {
+                let factor = (t_pop - 0.4) / 0.6;
+                1.15 * (1.0 - factor)
+            }
+        };
         
         for (child_of, mut transform) in visual_query.iter_mut() {
             if child_of.0 == fulfilling_entity {
@@ -396,6 +411,22 @@ pub fn animate_fulfilling_spheres(
             if child_of.0 == fulfilling_entity {
                 transform.scale = Vec3::splat(0.025 * scale);
             }
+        }
+    }
+}
+
+pub fn update_billboard_visibility(
+    colorblind: Res<ColorblindMode>,
+    mut query: Query<&mut Visibility, With<BillboardLabel>>,
+) {
+    if colorblind.is_changed() {
+        let new_visibility = if colorblind.0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        for mut visibility in query.iter_mut() {
+            *visibility = new_visibility;
         }
     }
 }
