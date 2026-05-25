@@ -9,7 +9,7 @@ pub enum AppState {
     GameOver,
 }
 
-use bevy_rapier3d::prelude::{Collider, RigidBody, ActiveEvents, Velocity};
+use bevy_rapier3d::prelude::{RigidBody, ActiveEvents, Velocity};
 
 #[derive(Component)]
 pub struct Sphere {
@@ -154,11 +154,10 @@ pub fn check_order_fulfillment(
                 fulfillment.entity = Some(entity);
                 fulfillment.timer.reset();
 
-                // Mark sphere as fulfilling and disable its physics entirely
+                // Mark sphere as fulfilling, lock it in place as fixed/static, but keep the collider active
                 commands.entity(entity)
                     .insert(Fulfilling)
-                    .remove::<Collider>()
-                    .remove::<RigidBody>()
+                    .insert(RigidBody::Fixed)
                     .remove::<ActiveEvents>()
                     .remove::<Velocity>();
 

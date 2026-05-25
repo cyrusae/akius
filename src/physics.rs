@@ -25,7 +25,7 @@ impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MergeEvent>()
             .add_systems(Update, (
-                detect_collisions,
+                (detect_collisions, check_distance_merges),
                 resolve_merges,
                 tick_merge_cooldowns,
                 handle_despawn_delay,
@@ -44,22 +44,26 @@ pub fn spawn_sphere_entity<'a>(
     velocity: Vec3,
 ) -> bevy::ecs::system::EntityCommands<'a> {
     let radius = crate::core_math::get_radius(tier);
+    // Scale density so smaller spheres are significantly denser and heavier,
+    // giving them more relative mass to nudge larger spheres.
+    let density = 15.0 / (tier as f32).powf(0.8);
     let cmd = commands.spawn((
         Sphere { tier },
         Transform::from_translation(translation),
         RigidBody::Dynamic,
         Collider::ball(radius),
+        ColliderMassProperties::Density(density),
         ActiveEvents::COLLISION_EVENTS,
         Restitution {
-            coefficient: 0.15,
+            coefficient: 0.05,
             combine_rule: CoefficientCombineRule::Max,
         },
         Friction {
-            coefficient: 0.5,
+            coefficient: 1.0,
             combine_rule: CoefficientCombineRule::Average,
         },
         Damping {
-            linear_damping: 0.4,
+            linear_damping: 0.8,
             angular_damping: 0.0,
         },
         Velocity {
@@ -89,6 +93,43 @@ pub fn detect_collisions(
                         entity_a: e1,
                         entity_b: e2,
                     });
+                }
+            }
+        }
+    }
+}
+
+/// Detects same-tier active spheres that are close enough to touch and merges them.
+/// This acts as a robust fallback for resting contacts and visual overlaps.
+pub fn check_distance_merges(
+    mut merge_events: MessageWriter<MergeEvent>,
+    sphere_query: Query<(Entity, &Sphere, &Transform), (Without<crate::game_state::InsideLauncher>, Without<MergeCooldown>, Without<crate::game_state::Fulfilling>)>,
+) {
+    let spheres: Vec<_> = sphere_query.iter().collect();
+    let mut merged_this_frame = HashSet::new();
+
+    for i in 0..spheres.len() {
+        for j in (i + 1)..spheres.len() {
+            let (e1, s1, t1) = spheres[i];
+            let (e2, s2, t2) = spheres[j];
+
+            if s1.tier == s2.tier {
+                let r1 = crate::core_math::get_radius(s1.tier);
+                let r2 = crate::core_math::get_radius(s2.tier);
+                
+                // Merge if distance is within the sum of radii + 0.05 units buffer
+                let threshold = r1 + r2 + 0.05;
+                let dist = t1.translation.distance(t2.translation);
+
+                if dist < threshold {
+                    if !merged_this_frame.contains(&e1) && !merged_this_frame.contains(&e2) {
+                        merged_this_frame.insert(e1);
+                        merged_this_frame.insert(e2);
+                        merge_events.write(MergeEvent {
+                            entity_a: e1,
+                            entity_b: e2,
+                        });
+                    }
                 }
             }
         }
@@ -248,13 +289,13 @@ mod tests {
             .entity(entity)
             .get::<Restitution>()
             .expect("Missing Restitution");
-        assert_eq!(restitution.coefficient, 0.15);
+        assert_eq!(restitution.coefficient, 0.05);
 
         let friction = world
             .entity(entity)
             .get::<Friction>()
             .expect("Missing Friction");
-        assert_eq!(friction.coefficient, 0.5);
+        assert_eq!(friction.coefficient, 1.0);
 
         let velocity = world
             .entity(entity)
