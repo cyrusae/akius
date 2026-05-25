@@ -40,7 +40,7 @@ pub fn spawn_sphere_entity<'a>(
             combine_rule: CoefficientCombineRule::Average,
         },
         Damping {
-            linear_damping: 0.6,
+            linear_damping: 0.4,
             angular_damping: 0.0,
         },
         Velocity {
@@ -128,17 +128,17 @@ pub fn resolve_merges(
 }
 
 /// Dampens positive Z-velocity (upward movement towards the player) 
-/// using an intensifying gradient that starts at the 1/4 mark (Z > 1.5).
+/// using an intensifying gradient that starts at the 1/10-1/8 mark (Z > -0.5).
 pub fn dampen_rebound_velocity(
     mut query: Query<(&Transform, &mut Velocity), With<Sphere>>,
 ) {
     for (transform, mut velocity) in query.iter_mut() {
         if velocity.linear.z > 0.0 {
-            if transform.translation.z > 1.5 {
-                // Calculate how far past the 1/4 mark the sphere is (clamped between 0.0 and 1.0 over a 8.0 unit range)
-                let t = ((transform.translation.z - 1.5) / 8.0).clamp(0.0, 1.0);
-                // Damping factor starts at 1.0 (no damping) and drops to 0.75 (heavy damping)
-                let damping = 1.0 - t * 0.25;
+            if transform.translation.z > -0.5 {
+                // Calculate how far past the 1/10-1/8 mark the sphere is (clamped between 0.0 and 1.0 over a 11.0 unit range)
+                let t = ((transform.translation.z - (-0.5)) / 11.0).clamp(0.0, 1.0);
+                // Damping factor starts at 1.0 (no damping) and drops to 0.60 (very heavy damping)
+                let damping = 1.0 - t * 0.40;
                 velocity.linear.z *= damping;
             }
         }
