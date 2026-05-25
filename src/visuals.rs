@@ -170,29 +170,7 @@ fn setup_visuals(
         Collider::cuboid(settings.arena_width * 0.5 + 0.2, wh * 0.5, 0.1),
     ));
 
-    // ---- Dashed loss-boundary line ----
-    let dash_mat = materials.add(StandardMaterial {
-        base_color: Color::hsl(0.0, 0.85, 0.55),
-        emissive: LinearRgba::new(0.6, 0.05, 0.05, 1.0),
-        ..default()
-    });
-    let dash_w   = 0.3_f32;
-    let dash_gap = 0.2_f32;
-    let dash_h   = 0.04_f32;
-    let dash_d   = 0.08_f32;
-    let step     = dash_w + dash_gap;
-    let n_dashes = ((settings.arena_width) / step).floor() as i32;
-    let start_x  = -(n_dashes as f32 * step * 0.5) + dash_w * 0.5;
 
-    for i in 0..n_dashes {
-        let x = start_x + i as f32 * step;
-        commands.spawn((
-            Name::new(format!("LossDash{i}")),
-            Mesh3d(meshes.add(Cuboid::new(dash_w, dash_h, dash_d))),
-            MeshMaterial3d(dash_mat.clone()),
-            Transform::from_xyz(x, dash_h * 0.5, settings.loss_boundary_z),
-        ));
-    }
 
     // ---- Launcher preview sphere ----
     commands.spawn((

@@ -30,7 +30,8 @@ impl Plugin for PhysicsPlugin {
                 tick_merge_cooldowns,
                 handle_despawn_delay,
                 dampen_rebound_velocity
-            ).chain());
+            ).chain())
+            .add_systems(Update, spill_spheres_on_game_over.run_if(in_state(crate::game_state::AppState::GameOver)));
     }
 }
 
@@ -239,6 +240,23 @@ pub fn dampen_rebound_velocity(
                 // Damping factor starts at 1.0 (no damping) and drops to 0.60 (very heavy damping)
                 let damping = 1.0 - t * 0.40;
                 velocity.linear.z *= damping;
+            }
+        }
+    }
+}
+
+/// Unlocks the Y-translation and all rotations for spheres that go past Z > settings.launcher_z
+/// when the game transitions to AppState::GameOver.
+pub fn spill_spheres_on_game_over(
+    mut commands: Commands,
+    sphere_query: Query<(Entity, &Transform, Option<&LockedAxes>), With<Sphere>>,
+    settings: Res<crate::game_state::GameSettings>,
+) {
+    for (entity, transform, locked_axes) in sphere_query.iter() {
+        if transform.translation.z > settings.launcher_z {
+            if locked_axes.is_some() {
+                // Remove LockedAxes component to let the sphere fall and tumble off the edge
+                commands.entity(entity).remove::<LockedAxes>();
             }
         }
     }

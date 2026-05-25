@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
-use crate::game_state::{GameSettings, Sphere};
+use crate::game_state::{GameSettings, Sphere, InsideLauncher};
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct LauncherPreview;
@@ -39,17 +39,20 @@ impl Plugin for LauncherPlugin {
                     handle_launch_input,
                     update_launcher_preview_visuals,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(not(in_state(crate::game_state::AppState::GameOver))),
             );
     }
 }
 
 /// Updates the aiming position by raycasting the screen cursor coordinates onto the Y=0 plane
+/// and constraining the X coordinate to prevent the preview sphere from overlapping existing spheres.
 pub fn update_launcher_aiming(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window>,
     settings: Res<GameSettings>,
     dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
+    sphere_query: Query<(&Transform, &Sphere), (Without<InsideLauncher>, Without<crate::game_state::Fulfilling>)>,
     mut launcher_state: ResMut<LauncherState>,
     time: Res<Time>,
 ) {
@@ -81,9 +84,52 @@ pub fn update_launcher_aiming(
     let half_width = settings.arena_width * 0.5;
 
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
-    let radius = crate::core_math::get_radius(current_tier);
-    let limit_x = (half_width - radius).max(0.0);
-    let clamped_x = intersection_point.x.clamp(-limit_x, limit_x);
+    let preview_radius = crate::core_math::get_radius(current_tier);
+    let limit_x = (half_width - preview_radius).max(0.0);
+    let mut clamped_x = intersection_point.x.clamp(-limit_x, limit_x);
+
+    // Compute 1D forbidden intervals on the launcher line (Z = settings.launcher_z)
+    let mut intervals: Vec<(f32, f32)> = Vec::new();
+    for (sphere_transform, sphere) in sphere_query.iter() {
+        let sphere_radius = crate::core_math::get_radius(sphere.tier);
+        let dz = (settings.launcher_z - sphere_transform.translation.z).abs();
+        let r_sum = preview_radius + sphere_radius;
+        if dz < r_sum {
+            // Overlap is possible along X
+            let dx_max = (r_sum * r_sum - dz * dz).sqrt();
+            let min_x = sphere_transform.translation.x - dx_max;
+            let max_x = sphere_transform.translation.x + dx_max;
+            intervals.push((min_x, max_x));
+        }
+    }
+
+    // Merge overlapping intervals
+    intervals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut merged_intervals: Vec<(f32, f32)> = Vec::new();
+    for interval in intervals {
+        if let Some(last) = merged_intervals.last_mut() {
+            if interval.0 <= last.1 {
+                last.1 = last.1.max(interval.1);
+            } else {
+                merged_intervals.push(interval);
+            }
+        } else {
+            merged_intervals.push(interval);
+        }
+    }
+
+    // Adjust target X if it lies within a forbidden interval
+    for (a, b) in merged_intervals {
+        if clamped_x > a && clamped_x < b {
+            if (clamped_x - a).abs() < (clamped_x - b).abs() {
+                clamped_x = a;
+            } else {
+                clamped_x = b;
+            }
+        }
+    }
+    // Re-clamp to boundaries in case snapping pushed it out of range
+    clamped_x = clamped_x.clamp(-limit_x, limit_x);
 
     launcher_state.target_x = clamped_x;
 
@@ -141,7 +187,6 @@ pub fn handle_launch_input(
     launcher_state.cooldown_timer.tick(time.delta());
 
     if mouse_button_input.just_pressed(MouseButton::Left)
-        && !launcher_state.obstructed
         && launcher_state.cooldown_timer.is_finished()
     {
         let current_tier = dispenser_queue.as_ref().map(|dq| dq.current).unwrap_or(1);

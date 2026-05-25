@@ -30,7 +30,6 @@ pub struct Fulfilling;
 
 #[derive(Resource, Clone)]
 pub struct GameSettings {
-    pub loss_boundary_z: f32,
     pub launcher_z: f32,
     pub arena_width: f32,
     pub arena_depth: f32,
@@ -41,7 +40,6 @@ pub struct GameSettings {
 impl Default for GameSettings {
     fn default() -> Self {
         Self {
-            loss_boundary_z: 10.0,
             launcher_z: 12.0,
             arena_width: 8.0,
             arena_depth: 14.0,
@@ -106,7 +104,7 @@ pub fn check_loss_condition(
     >,
 ) {
     for (entity, transform, loss_tracker) in sphere_query.iter_mut() {
-        if transform.translation.z > settings.loss_boundary_z {
+        if transform.translation.z > settings.launcher_z + 0.2 {
             if let Some(mut tracker) = loss_tracker {
                 tracker.timer.tick(time.delta());
                 if tracker.timer.is_finished() {
@@ -114,7 +112,7 @@ pub fn check_loss_condition(
                 }
             } else {
                 commands.entity(entity).insert(LossTracker {
-                    timer: Timer::from_seconds(1.5, TimerMode::Once),
+                    timer: Timer::from_seconds(0.5, TimerMode::Once),
                 });
             }
         } else if loss_tracker.is_some() {
@@ -185,7 +183,7 @@ mod tests {
         app.init_state::<AppState>();
         app.insert_resource(Time::<()>::default());
         app.insert_resource(GameSettings {
-            loss_boundary_z: 10.0,
+            launcher_z: 12.0,
             ..default()
         });
         app.add_systems(Update, check_loss_condition);
@@ -200,10 +198,10 @@ mod tests {
             AppState::InGame
         );
 
-        // Spawn a sphere behind the Z boundary
+        // Spawn a sphere past the launcher_z + 0.2 boundary (Z = 12.5)
         let entity = app
             .world_mut()
-            .spawn((Sphere { tier: 1 }, Transform::from_xyz(0.0, 0.0, 12.0)))
+            .spawn((Sphere { tier: 1 }, Transform::from_xyz(0.0, 0.0, 12.5)))
             .id();
 
         // Tick 1: LossTracker should be added
@@ -214,20 +212,20 @@ mod tests {
             AppState::InGame
         );
 
-        // Advance time by 1.0 second
+        // Advance time by 0.3 seconds
         app.world_mut()
             .resource_mut::<Time>()
-            .advance_by(Duration::from_secs_f32(1.0));
+            .advance_by(Duration::from_secs_f32(0.3));
         app.update();
         assert_eq!(
             *app.world().resource::<State<AppState>>().get(),
             AppState::InGame
         );
 
-        // Advance time by another 0.6 seconds (total 1.6s, exceeding 1.5s grace period)
+        // Advance time by another 0.3 seconds (total 0.6s, exceeding 0.5s grace period)
         app.world_mut()
             .resource_mut::<Time>()
-            .advance_by(Duration::from_secs_f32(0.6));
+            .advance_by(Duration::from_secs_f32(0.3));
         app.update(); // System ticks timer and sets NextState(GameOver)
         app.update(); // StateTransition applies state change
 
@@ -245,27 +243,27 @@ mod tests {
         app.init_state::<AppState>();
         app.insert_resource(Time::<()>::default());
         app.insert_resource(GameSettings {
-            loss_boundary_z: 10.0,
+            launcher_z: 12.0,
             ..default()
         });
         app.add_systems(Update, check_loss_condition);
 
         let entity = app
             .world_mut()
-            .spawn((Sphere { tier: 1 }, Transform::from_xyz(0.0, 0.0, 12.0)))
+            .spawn((Sphere { tier: 1 }, Transform::from_xyz(0.0, 0.0, 12.5)))
             .id();
 
         // Tick 1: Behind line -> LossTracker added
         app.update();
         assert!(app.world().entity(entity).get::<LossTracker>().is_some());
 
-        // Move sphere in front of line
+        // Move sphere in front of line (Z = 12.0, below 12.2)
         app.world_mut()
             .entity_mut(entity)
             .get_mut::<Transform>()
             .unwrap()
             .translation
-            .z = 8.0;
+            .z = 12.0;
 
         // Tick 2: In front -> LossTracker removed
         app.update();
@@ -279,7 +277,7 @@ mod tests {
         app.init_state::<AppState>();
         app.insert_resource(Time::<()>::default());
         app.insert_resource(GameSettings {
-            loss_boundary_z: 10.0,
+            launcher_z: 12.0,
             ..default()
         });
         app.add_systems(Update, check_loss_condition);
@@ -289,7 +287,7 @@ mod tests {
             .spawn((
                 Sphere { tier: 1 },
                 InsideLauncher,
-                Transform::from_xyz(0.0, 0.0, 12.0),
+                Transform::from_xyz(0.0, 0.0, 12.5),
             ))
             .id();
 
