@@ -117,6 +117,8 @@ impl Plugin for VisualPlugin {
                     update_billboards,
                     handle_keyboard_colorblind_toggle,
                     update_sphere_materials_on_mode_change,
+                    animate_merged_spawns,
+                    animate_fulfilling_spheres,
                 ),
             )
             // Observer: fires whenever a Sphere component is added to any entity
@@ -327,6 +329,73 @@ fn update_sphere_materials_on_mode_change(
     if colorblind.is_changed() {
         for (visual, mut mat_handle) in sphere_query.iter_mut() {
             *mat_handle = MeshMaterial3d(material_for_tier(visual.tier, colorblind.0, &tier_materials));
+        }
+    }
+}
+
+pub fn animate_merged_spawns(
+    cooldown_query: Query<&crate::physics::MergeCooldown>,
+    fulfilling_query: Query<&crate::game_state::Fulfilling>,
+    mut visual_query: Query<(&ChildOf, &mut Transform), With<SphereVisual>>,
+    mut billboard_query: Query<(&ChildOf, &mut Transform), (With<BillboardLabel>, Without<SphereVisual>)>,
+) {
+    for (child_of, mut transform) in visual_query.iter_mut() {
+        let parent = child_of.0;
+        if fulfilling_query.contains(parent) {
+            continue; // Skip fulfilling spheres
+        }
+        if let Ok(cooldown) = cooldown_query.get(parent) {
+            let elapsed = cooldown.timer.elapsed_secs();
+            let duration = cooldown.timer.duration().as_secs_f32();
+            let t = (elapsed / duration).clamp(0.0, 1.0);
+            let scale = 0.8 + t * 0.2;
+            transform.scale = Vec3::splat(scale);
+        } else {
+            if transform.scale != Vec3::ONE {
+                transform.scale = Vec3::ONE;
+            }
+        }
+    }
+    for (child_of, mut transform) in billboard_query.iter_mut() {
+        let parent = child_of.0;
+        if fulfilling_query.contains(parent) {
+            continue; // Skip fulfilling spheres
+        }
+        if let Ok(cooldown) = cooldown_query.get(parent) {
+            let elapsed = cooldown.timer.elapsed_secs();
+            let duration = cooldown.timer.duration().as_secs_f32();
+            let t = (elapsed / duration).clamp(0.0, 1.0);
+            let scale = 0.8 + t * 0.2;
+            transform.scale = Vec3::splat(0.025 * scale);
+        } else {
+            if transform.scale != Vec3::splat(0.025) {
+                transform.scale = Vec3::splat(0.025);
+            }
+        }
+    }
+}
+
+pub fn animate_fulfilling_spheres(
+    fulfillment: Option<Res<crate::game_state::ActiveFulfillment>>,
+    mut visual_query: Query<(&ChildOf, &mut Transform), With<SphereVisual>>,
+    mut billboard_query: Query<(&ChildOf, &mut Transform), (With<BillboardLabel>, Without<SphereVisual>)>,
+) {
+    let Some(fulfillment) = fulfillment else { return; };
+    if let Some(fulfilling_entity) = fulfillment.entity {
+        let elapsed = fulfillment.timer.elapsed_secs();
+        let duration = fulfillment.timer.duration().as_secs_f32();
+        let t = (elapsed / duration).clamp(0.0, 1.0);
+        let scale = 1.0 - t;
+        
+        for (child_of, mut transform) in visual_query.iter_mut() {
+            if child_of.0 == fulfilling_entity {
+                transform.scale = Vec3::splat(scale);
+            }
+        }
+        for (child_of, mut transform) in billboard_query.iter_mut() {
+            if child_of.0 == fulfilling_entity {
+                transform.scale = Vec3::splat(0.025 * scale);
+            }
         }
     }
 }

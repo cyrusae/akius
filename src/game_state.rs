@@ -8,6 +8,8 @@ pub enum AppState {
     GameOver,
 }
 
+use bevy_rapier3d::prelude::{Collider, RigidBody, ActiveEvents, Velocity};
+
 #[derive(Component)]
 pub struct Sphere {
     pub tier: u8,
@@ -20,6 +22,10 @@ pub struct InsideLauncher;
 pub struct LossTracker {
     pub timer: Timer,
 }
+
+#[derive(Component)]
+pub struct Fulfilling;
+
 
 #[derive(Resource, Clone)]
 pub struct GameSettings {
@@ -65,6 +71,22 @@ pub struct DispenserQueue {
     pub next: u8,
 }
 
+#[derive(Resource, Clone)]
+pub struct ActiveFulfillment {
+    pub entity: Option<Entity>,
+    pub timer: Timer,
+}
+
+impl Default for ActiveFulfillment {
+    fn default() -> Self {
+        Self {
+            entity: None,
+            timer: Timer::from_seconds(1.2, TimerMode::Once),
+        }
+    }
+}
+
+
 pub fn check_loss_condition(
     mut commands: Commands,
     time: Res<Time>,
@@ -72,7 +94,7 @@ pub fn check_loss_condition(
     mut next_state: ResMut<NextState<AppState>>,
     mut sphere_query: Query<
         (Entity, &Transform, Option<&mut LossTracker>),
-        (With<Sphere>, Without<InsideLauncher>),
+        (With<Sphere>, Without<InsideLauncher>, Without<Fulfilling>),
     >,
 ) {
     for (entity, transform, loss_tracker) in sphere_query.iter_mut() {
@@ -95,24 +117,47 @@ pub fn check_loss_condition(
 
 pub fn check_order_fulfillment(
     mut commands: Commands,
+    time: Res<Time>,
     mut score: ResMut<Score>,
     mut active_order: ResMut<ActiveOrder>,
-    sphere_query: Query<(Entity, &Sphere), Without<InsideLauncher>>,
+    mut fulfillment: ResMut<ActiveFulfillment>,
+    sphere_query: Query<(Entity, &Sphere), (Without<InsideLauncher>, Without<crate::physics::MergeCooldown>, Without<Fulfilling>)>,
 ) {
-    for (entity, sphere) in sphere_query.iter() {
-        if sphere.tier == active_order.target_tier {
-            // Despawn matching target sphere
+    if let Some(entity) = fulfillment.entity {
+        fulfillment.timer.tick(time.delta());
+        if fulfillment.timer.is_finished() {
+            // Despawn the sphere fully
             commands.entity(entity).despawn();
 
             // Increment score and update peak tier
             score.total += crate::core_math::get_order_points(active_order.target_tier);
-            if sphere.tier > score.peak_tier {
-                score.peak_tier = sphere.tier;
+            if active_order.target_tier > score.peak_tier {
+                score.peak_tier = active_order.target_tier;
             }
 
             // Assign a new order from the initial pool [3, 6]
             active_order.target_tier = rand::random_range(3..=6);
-            break; // Process one completion per frame
+
+            // Finish fulfillment
+            fulfillment.entity = None;
+        }
+    } else {
+        for (entity, sphere) in sphere_query.iter() {
+            if sphere.tier == active_order.target_tier {
+                // Start fulfillment
+                fulfillment.entity = Some(entity);
+                fulfillment.timer.reset();
+
+                // Mark sphere as fulfilling and disable its physics entirely
+                commands.entity(entity)
+                    .insert(Fulfilling)
+                    .remove::<Collider>()
+                    .remove::<RigidBody>()
+                    .remove::<ActiveEvents>()
+                    .remove::<Velocity>();
+
+                break; // Fulfill only one matching sphere at a time
+            }
         }
     }
 }
@@ -245,17 +290,31 @@ mod tests {
     #[test]
     fn test_order_fulfillment() {
         let mut app = App::new();
+        app.insert_resource(Time::<()>::default());
         app.insert_resource(Score {
             total: 0,
             peak_tier: 0,
         });
         app.insert_resource(ActiveOrder { target_tier: 4 });
+        app.insert_resource(ActiveFulfillment::default());
         app.add_systems(Update, check_order_fulfillment);
 
         // Spawn matching sphere
         let sphere_entity = app.world_mut().spawn(Sphere { tier: 4 }).id();
 
-        // Run frame
+        // Run frame 1: Should detect matching sphere and start fulfillment
+        app.update();
+
+        // Sphere should still exist but have Fulfilling component
+        assert!(app.world().get_entity(sphere_entity).is_ok());
+        assert!(app.world().entity(sphere_entity).get::<Fulfilling>().is_some());
+
+        // Advance time by 1.3 seconds to complete the 1.2s fulfillment
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs_f32(1.3));
+
+        // Run frame 2: Should complete fulfillment and despawn the sphere
         app.update();
 
         // Sphere should be despawned

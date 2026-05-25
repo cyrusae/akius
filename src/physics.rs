@@ -3,6 +3,16 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use std::collections::HashSet;
 
+#[derive(Component, Debug, Clone)]
+pub struct MergeCooldown {
+    pub timer: Timer,
+}
+
+#[derive(Component)]
+pub struct DespawnDelay {
+    pub frames: u32,
+}
+
 #[derive(Message, Debug, Clone, Copy)]
 pub struct MergeEvent {
     pub entity_a: Entity,
@@ -14,9 +24,17 @@ pub struct PhysicsPlugin;
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MergeEvent>()
-            .add_systems(Update, (detect_collisions, resolve_merges, dampen_rebound_velocity).chain());
+            .add_systems(Update, (
+                detect_collisions,
+                resolve_merges,
+                tick_merge_cooldowns,
+                handle_despawn_delay,
+                dampen_rebound_velocity
+            ).chain());
     }
 }
+
+
 
 /// Helper function to spawn a dynamic sphere with physics and axis-locking constraints
 pub fn spawn_sphere_entity<'a>(
@@ -31,6 +49,7 @@ pub fn spawn_sphere_entity<'a>(
         Transform::from_translation(translation),
         RigidBody::Dynamic,
         Collider::ball(radius),
+        ActiveEvents::COLLISION_EVENTS,
         Restitution {
             coefficient: 0.15,
             combine_rule: CoefficientCombineRule::Max,
@@ -58,7 +77,7 @@ pub fn spawn_sphere_entity<'a>(
 /// Detects started collisions between two same-tier active spheres and outputs a MergeEvent
 pub fn detect_collisions(
     mut collision_events: MessageReader<CollisionEvent>,
-    sphere_query: Query<&Sphere, Without<crate::game_state::InsideLauncher>>,
+    sphere_query: Query<&Sphere, (Without<crate::game_state::InsideLauncher>, Without<MergeCooldown>)>,
     mut merge_events: MessageWriter<MergeEvent>,
 ) {
     for event in collision_events.read() {
@@ -74,6 +93,7 @@ pub fn detect_collisions(
         }
     }
 }
+
 
 /// Resolves scheduled merges, spawning upgraded spheres at midpoints with conserved velocity
 pub fn resolve_merges(
@@ -100,13 +120,21 @@ pub fn resolve_merges(
                     continue; // Maximum tier achieved, cannot merge further
                 }
 
-                // Register entities as merged to block duplicate pairings
+                // Mark parents for next-frame despawn and remove collisions/physics immediately
                 merged_this_frame.insert(e1);
                 merged_this_frame.insert(e2);
-
-                // Despawn parents
-                commands.entity(e1).despawn();
-                commands.entity(e2).despawn();
+                commands.entity(e1)
+                    .insert(DespawnDelay { frames: 1 })
+                    .remove::<Collider>()
+                    .remove::<RigidBody>()
+                    .remove::<ActiveEvents>()
+                    .remove::<Velocity>();
+                commands.entity(e2)
+                    .insert(DespawnDelay { frames: 1 })
+                    .remove::<Collider>()
+                    .remove::<RigidBody>()
+                    .remove::<ActiveEvents>()
+                    .remove::<Velocity>();
 
                 // Spawn upgraded sphere at midpoint
                 let next_tier = current_tier + 1;
@@ -115,7 +143,10 @@ pub fn resolve_merges(
                 // 50% combined linear momentum conservation
                 let merged_velocity = (v1.linear + v2.linear) * 0.5 * 0.5;
 
-                spawn_sphere_entity(&mut commands, next_tier, midpoint, merged_velocity);
+                let mut cmd = spawn_sphere_entity(&mut commands, next_tier, midpoint, merged_velocity);
+                cmd.insert(MergeCooldown {
+                    timer: Timer::from_seconds(0.2, TimerMode::Once),
+                });
 
                 // Add points and record peak tier
                 score.total += crate::core_math::get_merge_points(next_tier);
@@ -123,6 +154,32 @@ pub fn resolve_merges(
                     score.peak_tier = next_tier;
                 }
             }
+        }
+    }
+}
+
+pub fn handle_despawn_delay(
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut DespawnDelay)>,
+) {
+    for (entity, mut delay) in query.iter_mut() {
+        if delay.frames == 0 {
+            commands.entity(entity).despawn();
+        } else {
+            delay.frames -= 1;
+        }
+    }
+}
+
+pub fn tick_merge_cooldowns(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut query: Query<(Entity, &mut MergeCooldown)>,
+) {
+    for (entity, mut cooldown) in query.iter_mut() {
+        cooldown.timer.tick(time.delta());
+        if cooldown.timer.is_finished() {
+            commands.entity(entity).remove::<MergeCooldown>();
         }
     }
 }

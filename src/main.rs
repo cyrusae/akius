@@ -24,12 +24,15 @@ fn main() {
         .add_plugins(launcher::LauncherPlugin)
         .add_plugins(visuals::VisualPlugin)
         .add_plugins(hud::HudPlugin)
+        .init_state::<game_state::AppState>()
         .insert_resource(game_state::GameSettings::default())
         .insert_resource(game_state::Score::default())
         .insert_resource(game_state::ColorblindMode::default())
         .insert_resource(game_state::ActiveOrder { target_tier: 4 })
         .insert_resource(game_state::DispenserQueue { current: 1, next: 2 })
+        .insert_resource(game_state::ActiveFulfillment::default())
         .add_systems(Startup, setup_camera_and_light)
+        .add_systems(Update, (game_state::check_loss_condition, game_state::check_order_fulfillment))
         .run();
 }
 
