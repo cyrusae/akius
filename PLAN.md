@@ -4,6 +4,20 @@ This document outlines the step-by-step implementation plan for **akiuS**, a phy
 
 ---
 
+## Testing Milestones & Human-in-the-Loop Testing
+
+To maximize development velocity and avoid premature manual playtesting (which is slow and error-prone), we divide verification into distinct zones:
+
+| Phase | Primary Testing Type | Meaning of Tests / Focus | Human-in-the-Loop Needed? |
+|---|---|---|---|
+| **Phase 2 (Math)** | **Unit Tests** | Pure logic functions (scaling, points, random distributions). | ❌ No (fully automated) |
+| **Phase 3 (ECS State)** | **ECS Integration Tests** | Bevy system updates, time counters, AppState transitions. | ❌ No (automated via mock Bevy app) |
+| **Phase 4 (Physics/Merge)** | **Physics Integration Tests** | Collision event simulation, entity spawning/despawning, momentum inheritance. | ❌ No (automated via headless collision injection) |
+| **Phase 5 (Input/Launch)** | **Interactive/Manual Testing** | Raycasting mouse controls, preview collision blocking, click-to-shoot responsiveness. | **Yes** (First playable milestone; game-feel tuning, slide friction, damping) |
+| **Phase 6 (UI/WASM)** | **Visual/Manual Testing** | Colorblind label readability, UI settings toggle, browser rendering, packaging size. | **Yes** (UI alignment, graphic fidelity, setting toggles) |
+
+---
+
 ## Testing Strategy in Bevy (ECS)
 
 In an ECS architecture, tests are split into two categories:

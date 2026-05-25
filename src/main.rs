@@ -1,3 +1,7 @@
+mod core_math;
+mod game_state;
+mod physics;
+
 use bevy::prelude::*;
 
 fn main() {
