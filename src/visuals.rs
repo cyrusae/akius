@@ -297,7 +297,6 @@ fn update_labels_screen_position(
     mut label_query: Query<(&BillboardLabel, &mut Transform, &mut Visibility), Without<Sphere>>,
     camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window>,
-    rapier_context: bevy_rapier3d::plugin::ReadRapierContext,
 ) {
     if !colorblind.0 {
         // If colorblind mode is OFF, hide all labels and exit
@@ -315,9 +314,6 @@ fn update_labels_screen_position(
     let win_h = window.height();
     let cam_pos = cam_transform.translation();
 
-    // Safely retrieve Rapier context
-    let context = rapier_context.single().ok();
-
     for (label, mut label_transform, mut visibility) in label_query.iter_mut() {
         if let Ok((sphere_entity, sphere_transform, sphere)) = sphere_query.get(label.0) {
             let sphere_pos = sphere_transform.translation;
@@ -326,23 +322,30 @@ fn update_labels_screen_position(
             // Project a point at the visual center of the sphere in world space
             let world_pos = sphere_pos + Vec3::Y * radius;
 
-                        // Raycast occlusion check: is the sphere occluded from the camera's perspective?
+            // Analytical ray-sphere occlusion check: is the visual sphere occluded from the camera's perspective?
             let mut occluded = false;
-            if let Some(ref ctx) = context {
-                let to_sphere = sphere_pos - cam_pos;
-                let dir = to_sphere.normalize();
-                let max_toi = to_sphere.length() - radius * 0.1; // stop just before the sphere center
-                if max_toi > 0.0 {
-                    if let Some((hit_entity, _toi)) = ctx.cast_ray(
-                        cam_pos,
-                        dir,
-                        max_toi,
-                        true,
-                        bevy_rapier3d::prelude::QueryFilter::default().exclude_collider(sphere_entity),
-                    ) {
-                        // If the ray hits any other active sphere, this label is occluded
-                        if sphere_query.contains(hit_entity) {
+            let to_target = world_pos - cam_pos;
+            let target_dist = to_target.length();
+            if target_dist > 0.0 {
+                let ray_dir = to_target / target_dist;
+                
+                for (other_entity, other_transform, other_sphere) in sphere_query.iter() {
+                    if other_entity == sphere_entity {
+                        continue;
+                    }
+                    let other_radius = get_radius(other_sphere.tier);
+                    // The visual center of the other sphere
+                    let other_visual_center = other_transform.translation + Vec3::Y * other_radius;
+                    
+                    let v = other_visual_center - cam_pos;
+                    let t = v.dot(ray_dir);
+                    // Only check spheres that lie between the camera and our target sphere (with a small buffer)
+                    if t > 0.0 && t < target_dist - radius * 0.1 {
+                        let d2 = v.length_squared() - t * t;
+                        let r2 = other_radius * other_radius;
+                        if d2 < r2 {
                             occluded = true;
+                            break;
                         }
                     }
                 }

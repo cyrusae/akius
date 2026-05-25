@@ -175,7 +175,7 @@ fn setup_hud(
             )).with_children(|btn| {
                 btn.spawn((
                     ColorblindButtonText,
-                    Text::new("Colorblind: OFF"),
+                    Text::new("Numbers: ON"),
                     TextFont {
                         font_size: 16.0,
                         ..default()
@@ -263,7 +263,7 @@ fn update_colorblind_button_text(
 ) {
     if colorblind.is_changed() {
         if let Ok(mut text) = query.single_mut() {
-            text.0 = format!("Colorblind: {}", if colorblind.0 { "ON" } else { "OFF" });
+            text.0 = format!("Numbers: {}", if colorblind.0 { "ON" } else { "OFF" });
         }
     }
 }

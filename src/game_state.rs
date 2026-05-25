@@ -52,8 +52,14 @@ impl Default for GameSettings {
 }
 
 /// Whether the colorblind-friendly sphere pattern overlay is active.
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Resource, Clone, Copy, PartialEq, Eq)]
 pub struct ColorblindMode(pub bool);
+
+impl Default for ColorblindMode {
+    fn default() -> Self {
+        Self(true)
+    }
+}
 
 #[derive(Resource, Default, Clone)]
 pub struct Score {
