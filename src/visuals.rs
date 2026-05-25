@@ -29,11 +29,11 @@ pub const TIER_COLORS: [Color; 10] = [
 #[derive(Component)]
 pub struct SphereVisual;
 
-/// Tag on a text child entity attached to a physics `Sphere` entity.
+/// Tag on a root-level Text2d label entity. Stores the sphere entity it follows.
 #[derive(Component)]
-pub struct BillboardLabel;
+pub struct BillboardLabel(pub Entity);
 
-/// Tag on a text child entity attached to the launcher preview sphere.
+/// Tag on a root-level Text2d label entity for the launcher preview sphere.
 #[derive(Component)]
 pub struct PreviewLabel;
 
@@ -92,11 +92,11 @@ impl Plugin for VisualPlugin {
                 (
                     update_preview_material,
                     update_preview_label,
-                    update_billboards,
+                    update_labels_screen_position,
                     handle_keyboard_colorblind_toggle,
-                    update_billboard_visibility,
                     animate_merged_spawns,
                     animate_fulfilling_spheres,
+                    cleanup_orphaned_labels,
                 ),
             )
             // Observer: fires whenever a Sphere component is added to any entity
@@ -207,27 +207,26 @@ fn setup_visuals(
         })),
         Transform::from_xyz(0.0, 0.0, settings.launcher_z),
         Visibility::Visible,
-    )).with_children(|parent| {
-        // Child preview label — offsets vertically by local 1.15 (just above 1.0 radius)
-        parent.spawn((
-            PreviewLabel,
-            Text2d::new("1"),
-            TextFont {
-                font_size: 40.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            TextLayout::new_with_justify(Justify::Center),
-            bevy::text::LineHeight::Px(40.0),
-            Transform::from_xyz(0.0, 1.15, 0.0)
-                .with_scale(Vec3::splat(0.025)),
-            Visibility::Hidden,
-        ));
-    });
+    ));
+
+    // ---- Preview label ----
+    commands.spawn((
+        PreviewLabel,
+        Text2d::new("1"),
+        TextFont {
+            font_size: 22.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        TextLayout::new_with_justify(Justify::Center),
+        bevy::text::LineHeight::Px(22.0),
+        Transform::from_xyz(0.0, 0.0, 10.0),
+        Visibility::Hidden,
+    ));
 }
 
 // ---------------------------------------------------------------------------
-// Observer — attach visual mesh and spawn 3D child billboard text label
+// Observer — attach visual mesh and spawn root-level 2D label
 // ---------------------------------------------------------------------------
 
 fn on_sphere_added(
@@ -246,7 +245,7 @@ fn on_sphere_added(
     let mat    = material_for_tier(sphere.tier, false, &tier_mats);
     let mesh   = meshes.add(bevy::math::primitives::Sphere::new(radius).mesh().uv(32, 18));
 
-    let initial_visibility = if cb { Visibility::Inherited } else { Visibility::Hidden };
+    let initial_visibility = if cb { Visibility::Visible } else { Visibility::Hidden };
 
     // Spawn 3D visual mesh child entity offset by radius in Y
     commands.entity(entity).with_children(|parent| {
@@ -256,23 +255,22 @@ fn on_sphere_added(
             SphereVisual,
             Transform::from_xyz(0.0, radius, 0.0),
         ));
-
-        // Spawn 2D billboard text child entity above the sphere
-        parent.spawn((
-            BillboardLabel,
-            Text2d::new(sphere.tier.to_string()),
-            TextFont {
-                font_size: 40.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            TextLayout::new_with_justify(Justify::Center),
-            bevy::text::LineHeight::Px(40.0),
-            Transform::from_xyz(0.0, radius * 2.0 + 0.15, 0.0)
-                .with_scale(Vec3::splat(0.025)),
-            initial_visibility,
-        ));
     });
+
+    // Spawn a root-level 2D text label that will be screen-projected on top of 3D
+    commands.spawn((
+        BillboardLabel(entity),
+        Text2d::new(sphere.tier.to_string()),
+        TextFont {
+            font_size: 22.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        TextLayout::new_with_justify(Justify::Center),
+        bevy::text::LineHeight::Px(22.0),
+        Transform::from_xyz(0.0, 0.0, 10.0), // Z coordinate in 2D space
+        initial_visibility,
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -292,14 +290,109 @@ fn update_preview_material(
     *mat_handle = MeshMaterial3d(material_for_tier(queue.current, cb, &tier_mats));
 }
 
-// Update the preview label text and visibility
+// Project each label's tracked sphere from 3D world space to 2D screen space.
+fn update_labels_screen_position(
+    colorblind: Res<ColorblindMode>,
+    sphere_query: Query<(Entity, &Transform, &Sphere)>,
+    mut label_query: Query<(&BillboardLabel, &mut Transform, &mut Visibility), Without<Sphere>>,
+    camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: Query<&Window>,
+    rapier_context: bevy_rapier3d::plugin::ReadRapierContext,
+) {
+    if !colorblind.0 {
+        // If colorblind mode is OFF, hide all labels and exit
+        for (_, _, mut visibility) in label_query.iter_mut() {
+            if *visibility != Visibility::Hidden {
+                *visibility = Visibility::Hidden;
+            }
+        }
+        return;
+    }
+
+    let Ok((camera, cam_transform)) = camera_3d_query.single() else { return; };
+    let Ok(window) = window_query.single() else { return; };
+    let win_w = window.width();
+    let win_h = window.height();
+    let cam_pos = cam_transform.translation();
+
+    // Safely retrieve Rapier context
+    let context = rapier_context.single().ok();
+
+    for (label, mut label_transform, mut visibility) in label_query.iter_mut() {
+        if let Ok((sphere_entity, sphere_transform, sphere)) = sphere_query.get(label.0) {
+            let sphere_pos = sphere_transform.translation;
+            let radius = get_radius(sphere.tier);
+            
+            // Project a point at the visual center of the sphere in world space
+            let world_pos = sphere_pos + Vec3::Y * radius;
+
+                        // Raycast occlusion check: is the sphere occluded from the camera's perspective?
+            let mut occluded = false;
+            if let Some(ref ctx) = context {
+                let to_sphere = sphere_pos - cam_pos;
+                let dir = to_sphere.normalize();
+                let max_toi = to_sphere.length() - radius * 0.1; // stop just before the sphere center
+                if max_toi > 0.0 {
+                    if let Some((hit_entity, _toi)) = ctx.cast_ray(
+                        cam_pos,
+                        dir,
+                        max_toi,
+                        true,
+                        bevy_rapier3d::prelude::QueryFilter::default().exclude_collider(sphere_entity),
+                    ) {
+                        // If the ray hits any other active sphere, this label is occluded
+                        if sphere_query.contains(hit_entity) {
+                            occluded = true;
+                        }
+                    }
+                }
+            }
+
+            if occluded {
+                if *visibility != Visibility::Hidden {
+                    *visibility = Visibility::Hidden;
+                }
+                continue;
+            }
+
+            // Project coordinates
+            if let Some(ndc) = camera.world_to_ndc(cam_transform, world_pos) {
+                if ndc.z < 0.0 || ndc.z > 1.0 {
+                    if *visibility != Visibility::Hidden {
+                        *visibility = Visibility::Hidden;
+                    }
+                    continue;
+                }
+                // NDC [-1,1] → screen pixels (origin at center for Camera2d)
+                let screen_x = ndc.x * win_w * 0.5;
+                let screen_y = ndc.y * win_h * 0.5;
+                label_transform.translation.x = screen_x;
+                label_transform.translation.y = screen_y;
+
+                if *visibility != Visibility::Visible {
+                    *visibility = Visibility::Visible;
+                }
+            } else {
+                if *visibility != Visibility::Hidden {
+                    *visibility = Visibility::Hidden;
+                }
+            }
+        }
+    }
+}
+
+// Track and project the launcher preview label onto the launcher preview sphere.
 fn update_preview_label(
     queue: Option<Res<DispenserQueue>>,
     colorblind: Option<Res<ColorblindMode>>,
-    mut label_query: Query<(&mut Text2d, &mut Visibility), With<PreviewLabel>>,
+    camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    preview_query: Query<(&Transform, &Visibility), With<LauncherPreview>>,
+    mut label_query: Query<(&mut Text2d, &mut Transform, &mut Visibility), (With<PreviewLabel>, Without<LauncherPreview>)>,
+    window_query: Query<&Window>,
 ) {
     let (Some(queue), Some(colorblind)) = (queue, colorblind) else { return; };
-    let Ok((mut text, mut visibility)) = label_query.single_mut() else { return; };
+    let Ok((preview_transform, preview_visibility)) = preview_query.single() else { return; };
+    let Ok((mut text, mut label_transform, mut visibility)) = label_query.single_mut() else { return; };
 
     // Update text
     let new_text = queue.current.to_string();
@@ -307,26 +400,46 @@ fn update_preview_label(
         text.0 = new_text;
     }
 
-    // Toggle visibility based on colorblind mode (Inherited to respect preview sphere's visibility)
-    let target_visibility = if colorblind.0 {
-        Visibility::Inherited
+    // Toggle visibility based on colorblind mode AND the preview sphere's visibility
+    let is_preview_visible = *preview_visibility == Visibility::Visible || *preview_visibility == Visibility::Inherited;
+    let target_visibility = if colorblind.0 && is_preview_visible {
+        Visibility::Visible
     } else {
         Visibility::Hidden
     };
     if *visibility != target_visibility {
         *visibility = target_visibility;
     }
+
+    // Project coordinates
+    if colorblind.0 && is_preview_visible {
+        let Ok((camera, cam_transform)) = camera_3d_query.single() else { return; };
+        let Ok(window) = window_query.single() else { return; };
+        let win_w = window.width();
+        let win_h = window.height();
+
+        let world_pos = preview_transform.translation;
+        if let Some(ndc) = camera.world_to_ndc(cam_transform, world_pos) {
+            if ndc.z >= 0.0 && ndc.z <= 1.0 {
+                let screen_x = ndc.x * win_w * 0.5;
+                let screen_y = ndc.y * win_h * 0.5;
+                label_transform.translation.x = screen_x;
+                label_transform.translation.y = screen_y;
+            }
+        }
+    }
 }
 
-// Rotate all billboard labels to face the camera.
-fn update_billboards(
-    camera_query: Query<&GlobalTransform, With<Camera3d>>,
-    mut billboard_query: Query<&mut Transform, Or<(With<BillboardLabel>, With<PreviewLabel>)>>,
+// Despawn label entities whose sphere has already been despawned.
+fn cleanup_orphaned_labels(
+    mut commands: Commands,
+    label_query: Query<(Entity, &BillboardLabel)>,
+    sphere_query: Query<Entity, With<Sphere>>,
 ) {
-    let Ok(camera_global_transform) = camera_query.single() else { return; };
-    let camera_rotation = camera_global_transform.compute_transform().rotation;
-    for mut transform in billboard_query.iter_mut() {
-        transform.rotation = camera_rotation;
+    for (label_entity, label) in label_query.iter() {
+        if sphere_query.get(label.0).is_err() {
+            commands.entity(label_entity).despawn();
+        }
     }
 }
 
@@ -344,7 +457,7 @@ pub fn animate_merged_spawns(
     cooldown_query: Query<&crate::physics::MergeCooldown>,
     fulfilling_query: Query<&crate::game_state::Fulfilling>,
     mut visual_query: Query<(&ChildOf, &mut Transform), With<SphereVisual>>,
-    mut billboard_query: Query<(&ChildOf, &mut Transform), (With<BillboardLabel>, Without<SphereVisual>)>,
+    mut label_query: Query<(&BillboardLabel, &mut Transform), Without<SphereVisual>>,
 ) {
     for (child_of, mut transform) in visual_query.iter_mut() {
         let parent = child_of.0;
@@ -363,8 +476,8 @@ pub fn animate_merged_spawns(
             }
         }
     }
-    for (child_of, mut transform) in billboard_query.iter_mut() {
-        let parent = child_of.0;
+    for (label, mut transform) in label_query.iter_mut() {
+        let parent = label.0;
         if fulfilling_query.contains(parent) {
             continue; // Skip fulfilling spheres
         }
@@ -373,10 +486,10 @@ pub fn animate_merged_spawns(
             let duration = cooldown.timer.duration().as_secs_f32();
             let t = (elapsed / duration).clamp(0.0, 1.0);
             let scale = 0.8 + t * 0.2;
-            transform.scale = Vec3::splat(0.025 * scale);
+            transform.scale = Vec3::splat(scale);
         } else {
-            if transform.scale != Vec3::splat(0.025) {
-                transform.scale = Vec3::splat(0.025);
+            if transform.scale != Vec3::ONE {
+                transform.scale = Vec3::ONE;
             }
         }
     }
@@ -385,7 +498,7 @@ pub fn animate_merged_spawns(
 pub fn animate_fulfilling_spheres(
     fulfillment: Option<Res<crate::game_state::ActiveFulfillment>>,
     mut visual_query: Query<(&ChildOf, &mut Transform), With<SphereVisual>>,
-    mut billboard_query: Query<(&ChildOf, &mut Transform), (With<BillboardLabel>, Without<SphereVisual>)>,
+    mut label_query: Query<(&BillboardLabel, &mut Transform), Without<SphereVisual>>,
 ) {
     let Some(fulfillment) = fulfillment else { return; };
     if let Some(fulfilling_entity) = fulfillment.entity {
@@ -411,26 +524,10 @@ pub fn animate_fulfilling_spheres(
                 transform.scale = Vec3::splat(scale);
             }
         }
-        for (child_of, mut transform) in billboard_query.iter_mut() {
-            if child_of.0 == fulfilling_entity {
-                transform.scale = Vec3::splat(0.025 * scale);
+        for (label, mut transform) in label_query.iter_mut() {
+            if label.0 == fulfilling_entity {
+                transform.scale = Vec3::splat(scale);
             }
-        }
-    }
-}
-
-pub fn update_billboard_visibility(
-    colorblind: Res<ColorblindMode>,
-    mut query: Query<&mut Visibility, With<BillboardLabel>>,
-) {
-    if colorblind.is_changed() {
-        let new_visibility = if colorblind.0 {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-        for mut visibility in query.iter_mut() {
-            *visibility = new_visibility;
         }
     }
 }
