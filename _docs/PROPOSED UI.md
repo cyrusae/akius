@@ -2,6 +2,12 @@
 
 Note: **This is not a final spec.** I am not sure if it's what I want! But it's a fully-generated spec from one session with Claude Design that I don't *dis*like and is a coherent direction. Saving for **reference, not concrete implementation.** Canonical aesthetics are still being deferred and have more considerations to factor in.
 
+Crucially, the mocks were in 2D--I think I need to wait until my usage budget resets, then have variants redrawn in 3D, because too much changes with the game board rendered accurately.
+
+Also would like to keep a rainbow theme as opposed to any monochrome accent color--return to this.
+
+Things that are probably being kept: I'm drawn to terminal-y/hacker aesthetics, but the shuffleboard needs a bit more texture.
+
 ---
 
 ## akius — aesthetic spec
