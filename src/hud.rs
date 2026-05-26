@@ -1,6 +1,6 @@
-use bevy::prelude::*;
-use crate::game_state::{Score, ActiveOrder, DispenserQueue, ColorblindMode, AimLineMode};
+use crate::game_state::{ActiveOrder, AimLineMode, ColorblindMode, DispenserQueue, Score};
 use crate::visuals::TIER_COLORS;
+use bevy::prelude::*;
 
 #[derive(Component)]
 pub struct ScoreText;
@@ -29,12 +29,14 @@ pub struct AimGuideButtonText;
 #[derive(Component)]
 pub struct GameOverScreen;
 
+#[derive(Component)]
+pub struct RestartButton;
+
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .add_systems(Startup, setup_hud)
+        app.add_systems(Startup, setup_hud)
             .add_systems(
                 Update,
                 (
@@ -47,193 +49,235 @@ impl Plugin for HudPlugin {
                     update_aim_guide_button_text,
                 ),
             )
-            .add_systems(OnEnter(crate::game_state::AppState::GameOver), spawn_game_over_screen)
-            .add_systems(OnExit(crate::game_state::AppState::GameOver), despawn_game_over_screen)
-            .add_systems(Update, handle_restart_input.run_if(in_state(crate::game_state::AppState::GameOver)));
+            .add_systems(
+                OnEnter(crate::game_state::AppState::GameOver),
+                spawn_game_over_screen,
+            )
+            .add_systems(
+                OnExit(crate::game_state::AppState::GameOver),
+                despawn_game_over_screen,
+            )
+            .add_systems(
+                Update,
+                (handle_restart_input, handle_restart_button)
+                    .run_if(in_state(crate::game_state::AppState::GameOver)),
+            );
     }
 }
 
-fn setup_hud(
-    mut commands: Commands,
-) {
+fn setup_hud(mut commands: Commands) {
     // Main full screen container
-    commands.spawn(Node {
-        width: Val::Percent(100.0),
-        height: Val::Percent(100.0),
-        position_type: PositionType::Absolute,
-        flex_direction: FlexDirection::Column,
-        justify_content: JustifyContent::SpaceBetween,
-        padding: UiRect::all(Val::Px(20.0)),
-        ..default()
-    }).with_children(|parent| {
-        // Top row
-        parent.spawn(Node {
+    commands
+        .spawn(Node {
             width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
+            height: Val::Percent(100.0),
+            position_type: PositionType::Absolute,
+            flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
+            padding: UiRect::all(Val::Px(20.0)),
             ..default()
-        }).with_children(|top_row| {
-            // Score panel (Top-left)
-            top_row.spawn((
-                Node {
-                    padding: UiRect::new(Val::Px(15.0), Val::Px(15.0), Val::Px(10.0), Val::Px(10.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-                BorderColor::all(Color::WHITE),
-            )).with_children(|score_panel| {
-                score_panel.spawn((
-                    ScoreText,
-                    Text::new("Score: 0"),
-                    TextFont {
-                        font_size: 24.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-
-            // Target Order panel (Top-center)
-            top_row.spawn((
-                Node {
-                    padding: UiRect::new(Val::Px(15.0), Val::Px(15.0), Val::Px(10.0), Val::Px(10.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-                BorderColor::all(Color::WHITE),
-            )).with_children(|order_panel| {
-                order_panel.spawn((
-                    OrderText,
-                    Text::new("Target: Tier 6"),
-                    TextFont {
-                        font_size: 24.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-
-            // Next sphere preview panel (Top-right)
-            top_row.spawn((
-                Node {
-                    padding: UiRect::new(Val::Px(15.0), Val::Px(15.0), Val::Px(10.0), Val::Px(10.0)),
-                    border: UiRect::all(Val::Px(2.0)),
+        })
+        .with_children(|parent| {
+            // Top row
+            parent
+                .spawn(Node {
+                    width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
                     align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
                     ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-                BorderColor::all(Color::WHITE),
-            )).with_children(|next_panel| {
-                next_panel.spawn((
-                    Text::new("Next:"),
-                    TextFont {
-                        font_size: 20.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-                
-                // Color swatch
-                next_panel.spawn((
-                    NextSpherePreviewSwatch,
-                    Node {
-                        width: Val::Px(24.0),
-                        height: Val::Px(24.0),
-                        border_radius: BorderRadius::all(Val::Px(12.0)),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(Color::WHITE),
-                )).with_children(|swatch| {
-                    swatch.spawn((
-                        NextSpherePreviewText,
-                        Text::new(""),
-                        TextFont {
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+                })
+                .with_children(|top_row| {
+                    // Score panel (Top-left)
+                    top_row
+                        .spawn((
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(15.0),
+                                    Val::Px(15.0),
+                                    Val::Px(10.0),
+                                    Val::Px(10.0),
+                                ),
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+                            BorderColor::all(Color::WHITE),
+                        ))
+                        .with_children(|score_panel| {
+                            score_panel.spawn((
+                                ScoreText,
+                                Text::new("Score: 0"),
+                                TextFont {
+                                    font_size: 24.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+
+                    // Target Order panel (Top-center)
+                    top_row
+                        .spawn((
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(15.0),
+                                    Val::Px(15.0),
+                                    Val::Px(10.0),
+                                    Val::Px(10.0),
+                                ),
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+                            BorderColor::all(Color::WHITE),
+                        ))
+                        .with_children(|order_panel| {
+                            order_panel.spawn((
+                                OrderText,
+                                Text::new("Target: Tier 6"),
+                                TextFont {
+                                    font_size: 24.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+
+                    // Next sphere preview panel (Top-right)
+                    top_row
+                        .spawn((
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(15.0),
+                                    Val::Px(15.0),
+                                    Val::Px(10.0),
+                                    Val::Px(10.0),
+                                ),
+                                border: UiRect::all(Val::Px(2.0)),
+                                flex_direction: FlexDirection::Row,
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(10.0),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+                            BorderColor::all(Color::WHITE),
+                        ))
+                        .with_children(|next_panel| {
+                            next_panel.spawn((
+                                Text::new("Next:"),
+                                TextFont {
+                                    font_size: 20.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+
+                            // Color swatch
+                            next_panel
+                                .spawn((
+                                    NextSpherePreviewSwatch,
+                                    Node {
+                                        width: Val::Px(24.0),
+                                        height: Val::Px(24.0),
+                                        border_radius: BorderRadius::all(Val::Px(12.0)),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::WHITE),
+                                ))
+                                .with_children(|swatch| {
+                                    swatch.spawn((
+                                        NextSpherePreviewText,
+                                        Text::new(""),
+                                        TextFont {
+                                            font_size: 16.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::WHITE),
+                                    ));
+                                });
+                        });
                 });
-            });
-        });
 
-        // Bottom row
-        parent.spawn(Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::FlexEnd,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(15.0),
-            ..default()
-        }).with_children(|bottom_row| {
-            // Aim Guide button
-            bottom_row.spawn((
-                AimGuideButton,
-                Button,
-                Node {
-                    width: Val::Px(160.0),
-                    height: Val::Px(45.0),
-                    justify_content: JustifyContent::Center,
+            // Bottom row
+            parent
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::FlexEnd,
                     align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(2.0)),
+                    column_gap: Val::Px(15.0),
                     ..default()
-                },
-                BorderColor::all(Color::WHITE),
-                BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
-            )).with_children(|btn| {
-                btn.spawn((
-                    AimGuideButtonText,
-                    Text::new("Aim Line: OFF"),
-                    TextFont {
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
+                })
+                .with_children(|bottom_row| {
+                    // Aim Guide button
+                    bottom_row
+                        .spawn((
+                            AimGuideButton,
+                            Button,
+                            Node {
+                                width: Val::Px(160.0),
+                                height: Val::Px(45.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BorderColor::all(Color::WHITE),
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                AimGuideButtonText,
+                                Text::new("Aim Line: OFF"),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
 
-            // Colorblind button (Bottom-right)
-            bottom_row.spawn((
-                ColorblindButton,
-                Button,
-                Node {
-                    width: Val::Px(160.0),
-                    height: Val::Px(45.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(2.0)),
-                    ..default()
-                },
-                BorderColor::all(Color::WHITE),
-                BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
-            )).with_children(|btn| {
-                btn.spawn((
-                    ColorblindButtonText,
-                    Text::new("Numbers: ON"),
-                    TextFont {
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
+                    // Colorblind button (Bottom-right)
+                    bottom_row
+                        .spawn((
+                            ColorblindButton,
+                            Button,
+                            Node {
+                                width: Val::Px(160.0),
+                                height: Val::Px(45.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BorderColor::all(Color::WHITE),
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                ColorblindButtonText,
+                                Text::new("Numbers: ON"),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+                });
         });
-    });
 }
 
-fn update_score_hud(
-    score: Option<Res<Score>>,
-    mut query: Query<&mut Text, With<ScoreText>>,
-) {
-    let Some(score) = score else { return; };
-    let Ok(mut text) = query.single_mut() else { return; };
+fn update_score_hud(score: Option<Res<Score>>, mut query: Query<&mut Text, With<ScoreText>>) {
+    let Some(score) = score else {
+        return;
+    };
+    let Ok(mut text) = query.single_mut() else {
+        return;
+    };
     let new_text = format!("Score: {}", score.total);
     if text.0 != new_text {
         text.0 = new_text;
@@ -244,8 +288,12 @@ fn update_order_hud(
     active_order: Option<Res<ActiveOrder>>,
     mut query: Query<&mut Text, With<OrderText>>,
 ) {
-    let Some(active_order) = active_order else { return; };
-    let Ok(mut text) = query.single_mut() else { return; };
+    let Some(active_order) = active_order else {
+        return;
+    };
+    let Ok(mut text) = query.single_mut() else {
+        return;
+    };
     let new_text = format!("Target: Tier {}", active_order.target_tier);
     if text.0 != new_text {
         text.0 = new_text;
@@ -257,7 +305,9 @@ fn update_next_sphere_hud(
     mut swatch_query: Query<&mut BackgroundColor, With<NextSpherePreviewSwatch>>,
     mut text_query: Query<&mut Text, With<NextSpherePreviewText>>,
 ) {
-    let Some(queue) = queue else { return; };
+    let Some(queue) = queue else {
+        return;
+    };
     let idx = (queue.next as usize).saturating_sub(1).min(9);
 
     let color = TIER_COLORS[idx];
@@ -309,52 +359,79 @@ fn update_colorblind_button_text(
     }
 }
 
-fn spawn_game_over_screen(
-    mut commands: Commands,
-    score: Res<Score>,
-) {
-    commands.spawn((
-        GameOverScreen,
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            position_type: PositionType::Absolute,
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            row_gap: Val::Px(20.0),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
-        ZIndex(100),
-    )).with_children(|parent| {
-        parent.spawn((
-            Text::new("FATAL: board.overflow"),
-            TextFont {
-                font_size: 40.0,
+fn spawn_game_over_screen(mut commands: Commands, score: Res<Score>) {
+    commands
+        .spawn((
+            GameOverScreen,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                position_type: PositionType::Absolute,
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(20.0),
                 ..default()
             },
-            TextColor(Color::srgb(0.9, 0.1, 0.1)),
-        ));
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
+            ZIndex(100),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("FATAL: board.overflow"),
+                TextFont {
+                    font_size: 40.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.1, 0.1)),
+            ));
 
-        parent.spawn((
-            Text::new(format!("final.score = {:06}", score.total)),
-            TextFont {
-                font_size: 32.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.1, 0.9, 0.1)),
-        ));
+            parent.spawn((
+                Text::new(format!("final.score = {:06}", score.total)),
+                TextFont {
+                    font_size: 32.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.1, 0.9, 0.1)),
+            ));
 
-        parent.spawn((
-            Text::new("[ press space to restart ]"),
-            TextFont {
-                font_size: 20.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.5, 0.8, 0.5)),
-        ));
-    });
+            parent.spawn((
+                Text::new("[ press space to restart ]"),
+                TextFont {
+                    font_size: 20.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.5, 0.8, 0.5)),
+            ));
+
+            // Restart button
+            parent
+                .spawn((
+                    RestartButton,
+                    Button,
+                    Node {
+                        width: Val::Px(160.0),
+                        height: Val::Px(45.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(2.0)),
+                        margin: UiRect::top(Val::Px(10.0)),
+                        ..default()
+                    },
+                    BorderColor::all(Color::WHITE),
+                    BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new("RESTART"),
+                        TextFont {
+                            font_size: 18.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+        });
 }
 
 fn despawn_recursive_custom(
@@ -385,7 +462,32 @@ fn handle_restart_input(
     mut next_state: ResMut<NextState<crate::game_state::AppState>>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
+        info!("Spacebar restart triggered!");
         next_state.set(crate::game_state::AppState::MainMenu);
+    }
+}
+
+fn handle_restart_button(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<RestartButton>),
+    >,
+    mut next_state: ResMut<NextState<crate::game_state::AppState>>,
+) {
+    for (interaction, mut bg_color) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                info!("Restart button clicked!");
+                next_state.set(crate::game_state::AppState::MainMenu);
+                *bg_color = BackgroundColor(Color::srgb(0.35, 0.35, 0.35));
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.25, 0.25, 0.25));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.15));
+            }
+        }
     }
 }
 

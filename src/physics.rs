@@ -24,18 +24,23 @@ pub struct PhysicsPlugin;
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MergeEvent>()
-            .add_systems(Update, (
-                (detect_collisions, check_distance_merges),
-                resolve_merges,
-                tick_merge_cooldowns,
-                handle_despawn_delay,
-                spill_spheres,
-            ).chain())
-            .add_systems(OnEnter(crate::game_state::AppState::GameOver), unlock_all_spheres_on_game_over);
+            .add_systems(
+                Update,
+                (
+                    (detect_collisions, check_distance_merges),
+                    resolve_merges,
+                    tick_merge_cooldowns,
+                    handle_despawn_delay,
+                    spill_spheres,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                OnEnter(crate::game_state::AppState::GameOver),
+                unlock_all_spheres_on_game_over,
+            );
     }
 }
-
-
 
 /// Helper function to spawn a dynamic sphere with physics and axis-locking constraints
 pub fn spawn_sphere_entity<'a>(
@@ -83,7 +88,13 @@ pub fn spawn_sphere_entity<'a>(
 /// Detects started collisions between two same-tier active spheres and outputs a MergeEvent
 pub fn detect_collisions(
     mut collision_events: MessageReader<CollisionEvent>,
-    sphere_query: Query<&Sphere, (Without<crate::game_state::InsideLauncher>, Without<MergeCooldown>)>,
+    sphere_query: Query<
+        &Sphere,
+        (
+            Without<crate::game_state::InsideLauncher>,
+            Without<MergeCooldown>,
+        ),
+    >,
     mut merge_events: MessageWriter<MergeEvent>,
 ) {
     for event in collision_events.read() {
@@ -104,7 +115,14 @@ pub fn detect_collisions(
 /// This acts as a robust fallback for resting contacts and visual overlaps.
 pub fn check_distance_merges(
     mut merge_events: MessageWriter<MergeEvent>,
-    sphere_query: Query<(Entity, &Sphere, &Transform), (Without<crate::game_state::InsideLauncher>, Without<MergeCooldown>, Without<crate::game_state::Fulfilling>)>,
+    sphere_query: Query<
+        (Entity, &Sphere, &Transform),
+        (
+            Without<crate::game_state::InsideLauncher>,
+            Without<MergeCooldown>,
+            Without<crate::game_state::Fulfilling>,
+        ),
+    >,
 ) {
     let spheres: Vec<_> = sphere_query.iter().collect();
     let mut merged_this_frame = HashSet::new();
@@ -117,7 +135,7 @@ pub fn check_distance_merges(
             if s1.tier == s2.tier {
                 let r1 = crate::core_math::get_radius(s1.tier);
                 let r2 = crate::core_math::get_radius(s2.tier);
-                
+
                 // Merge if distance is within the sum of radii + 0.05 units buffer
                 let threshold = r1 + r2 + 0.05;
                 let dist = t1.translation.distance(t2.translation);
@@ -136,7 +154,6 @@ pub fn check_distance_merges(
         }
     }
 }
-
 
 /// Resolves scheduled merges, spawning upgraded spheres at midpoints with conserved velocity
 pub fn resolve_merges(
@@ -166,13 +183,15 @@ pub fn resolve_merges(
                 // Mark parents for next-frame despawn and remove collisions/physics immediately
                 merged_this_frame.insert(e1);
                 merged_this_frame.insert(e2);
-                commands.entity(e1)
+                commands
+                    .entity(e1)
                     .insert(DespawnDelay { frames: 1 })
                     .remove::<Collider>()
                     .remove::<RigidBody>()
                     .remove::<ActiveEvents>()
                     .remove::<Velocity>();
-                commands.entity(e2)
+                commands
+                    .entity(e2)
                     .insert(DespawnDelay { frames: 1 })
                     .remove::<Collider>()
                     .remove::<RigidBody>()
@@ -186,7 +205,8 @@ pub fn resolve_merges(
                 // 50% combined linear momentum conservation
                 let merged_velocity = (v1.linear + v2.linear) * 0.5 * 0.5;
 
-                let mut cmd = spawn_sphere_entity(&mut commands, next_tier, midpoint, merged_velocity);
+                let mut cmd =
+                    spawn_sphere_entity(&mut commands, next_tier, midpoint, merged_velocity);
                 cmd.insert(MergeCooldown {
                     timer: Timer::from_seconds(0.2, TimerMode::Once),
                 });
@@ -201,10 +221,7 @@ pub fn resolve_merges(
     }
 }
 
-pub fn handle_despawn_delay(
-    mut commands: Commands,
-    mut query: Query<(Entity, &mut DespawnDelay)>,
-) {
+pub fn handle_despawn_delay(mut commands: Commands, mut query: Query<(Entity, &mut DespawnDelay)>) {
     for (entity, mut delay) in query.iter_mut() {
         if delay.frames == 0 {
             commands.entity(entity).despawn();
@@ -227,7 +244,7 @@ pub fn tick_merge_cooldowns(
     }
 }
 
-/// Dampens positive Z-velocity (upward movement towards the player) 
+/// Dampens positive Z-velocity (upward movement towards the player)
 /// Unlocks the Y-translation and all rotations for spheres that go past Z > settings.launcher_z
 /// during gameplay so they visually roll and fall off the edge of the table.
 pub fn spill_spheres(

@@ -1,8 +1,8 @@
+use crate::core_math::get_radius;
+use crate::game_state::{AimLineMode, ColorblindMode, DispenserQueue, GameSettings, Sphere};
+use crate::launcher::{LauncherPreview, LauncherState};
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Collider;
-use crate::game_state::{ColorblindMode, DispenserQueue, GameSettings, Sphere, AimLineMode};
-use crate::core_math::get_radius;
-use crate::launcher::{LauncherPreview, LauncherState};
 
 // ---------------------------------------------------------------------------
 // Tier color palette — warm perceptual gradient, violet → sky blue → lime →
@@ -14,11 +14,11 @@ pub const TIER_COLORS: [Color; 10] = [
     Color::hsl(195.0, 0.70, 0.55), // Tier  3 — sky blue
     Color::hsl(165.0, 0.65, 0.50), // Tier  4 — teal
     Color::hsl(120.0, 0.60, 0.45), // Tier  5 — green
-    Color::hsl( 80.0, 0.65, 0.48), // Tier  6 — yellow-green
-    Color::hsl( 50.0, 0.80, 0.52), // Tier  7 — amber
-    Color::hsl( 20.0, 0.85, 0.52), // Tier  8 — orange
-    Color::hsl(  0.0, 0.78, 0.52), // Tier  9 — red
-    Color::hsl( 45.0, 0.90, 0.55), // Tier 10 — gold (max)
+    Color::hsl(80.0, 0.65, 0.48),  // Tier  6 — yellow-green
+    Color::hsl(50.0, 0.80, 0.52),  // Tier  7 — amber
+    Color::hsl(20.0, 0.85, 0.52),  // Tier  8 — orange
+    Color::hsl(0.0, 0.78, 0.52),   // Tier  9 — red
+    Color::hsl(45.0, 0.90, 0.55),  // Tier 10 — gold (max)
 ];
 
 // ---------------------------------------------------------------------------
@@ -52,9 +52,7 @@ pub struct TierMaterials {
 }
 
 /// Build all 10 tier materials.
-fn build_tier_materials(
-    materials: &mut Assets<StandardMaterial>,
-) -> TierMaterials {
+fn build_tier_materials(materials: &mut Assets<StandardMaterial>) -> TierMaterials {
     let normal = std::array::from_fn(|i| {
         let color = TIER_COLORS[i];
         materials.add(StandardMaterial {
@@ -124,8 +122,8 @@ fn setup_visuals(
     commands.insert_resource(tier_mats);
 
     let half_w = settings.arena_width * 0.5;
-    let depth  = settings.arena_depth;
-    let wh     = settings.wall_height;
+    let depth = settings.arena_depth;
+    let wh = settings.wall_height;
 
     // Center Z of the floor and walls relative to launcher_z so it extends back
     let center_z = settings.launcher_z - depth * 0.5;
@@ -192,8 +190,6 @@ fn setup_visuals(
         Visibility::Hidden,
     ));
 
-
-
     // ---- Launcher preview sphere ----
     commands.spawn((
         Name::new("Launcher Preview"),
@@ -238,14 +234,26 @@ fn on_sphere_added(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let entity = trigger.event_target();
-    let Ok(sphere) = sphere_query.get(entity) else { return; };
-    let Some(tier_mats) = tier_mats else { return; };
+    let Ok(sphere) = sphere_query.get(entity) else {
+        return;
+    };
+    let Some(tier_mats) = tier_mats else {
+        return;
+    };
     let cb = colorblind.map(|r| r.0).unwrap_or(false);
     let radius = get_radius(sphere.tier);
-    let mat    = material_for_tier(sphere.tier, false, &tier_mats);
-    let mesh   = meshes.add(bevy::math::primitives::Sphere::new(radius).mesh().uv(32, 18));
+    let mat = material_for_tier(sphere.tier, false, &tier_mats);
+    let mesh = meshes.add(
+        bevy::math::primitives::Sphere::new(radius)
+            .mesh()
+            .uv(32, 18),
+    );
 
-    let initial_visibility = if cb { Visibility::Visible } else { Visibility::Hidden };
+    let initial_visibility = if cb {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
 
     // Spawn 3D visual mesh child entity offset by radius in Y
     commands.entity(entity).with_children(|parent| {
@@ -283,10 +291,14 @@ fn update_preview_material(
     colorblind: Option<Res<ColorblindMode>>,
     mut preview_query: Query<&mut MeshMaterial3d<StandardMaterial>, With<LauncherPreview>>,
 ) {
-    let (Some(queue), Some(tier_mats)) = (queue, tier_mats) else { return; };
+    let (Some(queue), Some(tier_mats)) = (queue, tier_mats) else {
+        return;
+    };
     let cb = colorblind.map(|r| r.0).unwrap_or(false);
 
-    let Ok(mut mat_handle) = preview_query.single_mut() else { return; };
+    let Ok(mut mat_handle) = preview_query.single_mut() else {
+        return;
+    };
     *mat_handle = MeshMaterial3d(material_for_tier(queue.current, cb, &tier_mats));
 }
 
@@ -308,8 +320,12 @@ fn update_labels_screen_position(
         return;
     }
 
-    let Ok((camera, cam_transform)) = camera_3d_query.single() else { return; };
-    let Ok(window) = window_query.single() else { return; };
+    let Ok((camera, cam_transform)) = camera_3d_query.single() else {
+        return;
+    };
+    let Ok(window) = window_query.single() else {
+        return;
+    };
     let win_w = window.width();
     let win_h = window.height();
     let cam_pos = cam_transform.translation();
@@ -318,7 +334,7 @@ fn update_labels_screen_position(
         if let Ok((sphere_entity, sphere_transform, sphere)) = sphere_query.get(label.0) {
             let sphere_pos = sphere_transform.translation;
             let radius = get_radius(sphere.tier);
-            
+
             // Project a point at the visual center of the sphere in world space
             let world_pos = sphere_pos + Vec3::Y * radius;
 
@@ -328,7 +344,7 @@ fn update_labels_screen_position(
             let target_dist = to_target.length();
             if target_dist > 0.0 {
                 let ray_dir = to_target / target_dist;
-                
+
                 for (other_entity, other_transform, other_sphere) in sphere_query.iter() {
                     if other_entity == sphere_entity {
                         continue;
@@ -336,7 +352,7 @@ fn update_labels_screen_position(
                     let other_radius = get_radius(other_sphere.tier);
                     // The visual center of the other sphere
                     let other_visual_center = other_transform.translation + Vec3::Y * other_radius;
-                    
+
                     let v = other_visual_center - cam_pos;
                     let t = v.dot(ray_dir);
                     // Only check spheres that lie between the camera and our target sphere (with a small buffer)
@@ -390,12 +406,21 @@ fn update_preview_label(
     colorblind: Option<Res<ColorblindMode>>,
     camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     preview_query: Query<(&Transform, &Visibility), With<LauncherPreview>>,
-    mut label_query: Query<(&mut Text2d, &mut Transform, &mut Visibility), (With<PreviewLabel>, Without<LauncherPreview>)>,
+    mut label_query: Query<
+        (&mut Text2d, &mut Transform, &mut Visibility),
+        (With<PreviewLabel>, Without<LauncherPreview>),
+    >,
     window_query: Query<&Window>,
 ) {
-    let (Some(queue), Some(colorblind)) = (queue, colorblind) else { return; };
-    let Ok((preview_transform, preview_visibility)) = preview_query.single() else { return; };
-    let Ok((mut text, mut label_transform, mut visibility)) = label_query.single_mut() else { return; };
+    let (Some(queue), Some(colorblind)) = (queue, colorblind) else {
+        return;
+    };
+    let Ok((preview_transform, preview_visibility)) = preview_query.single() else {
+        return;
+    };
+    let Ok((mut text, mut label_transform, mut visibility)) = label_query.single_mut() else {
+        return;
+    };
 
     // Update text
     let new_text = queue.current.to_string();
@@ -404,7 +429,8 @@ fn update_preview_label(
     }
 
     // Toggle visibility based on colorblind mode AND the preview sphere's visibility
-    let is_preview_visible = *preview_visibility == Visibility::Visible || *preview_visibility == Visibility::Inherited;
+    let is_preview_visible =
+        *preview_visibility == Visibility::Visible || *preview_visibility == Visibility::Inherited;
     let target_visibility = if colorblind.0 && is_preview_visible {
         Visibility::Visible
     } else {
@@ -416,8 +442,12 @@ fn update_preview_label(
 
     // Project coordinates
     if colorblind.0 && is_preview_visible {
-        let Ok((camera, cam_transform)) = camera_3d_query.single() else { return; };
-        let Ok(window) = window_query.single() else { return; };
+        let Ok((camera, cam_transform)) = camera_3d_query.single() else {
+            return;
+        };
+        let Ok(window) = window_query.single() else {
+            return;
+        };
         let win_w = window.width();
         let win_h = window.height();
 
@@ -526,12 +556,14 @@ pub fn animate_fulfilling_spheres(
     mut visual_query: Query<(&ChildOf, &mut Transform), With<SphereVisual>>,
     mut label_query: Query<(&BillboardLabel, &mut Transform), Without<SphereVisual>>,
 ) {
-    let Some(fulfillment) = fulfillment else { return; };
+    let Some(fulfillment) = fulfillment else {
+        return;
+    };
     if let Some(fulfilling_entity) = fulfillment.entity {
         let elapsed = fulfillment.timer.elapsed_secs();
         let duration = fulfillment.timer.duration().as_secs_f32();
         let t = (elapsed / duration).clamp(0.0, 1.0);
-        
+
         let scale = if t < 0.75 {
             1.0
         } else {
@@ -544,7 +576,7 @@ pub fn animate_fulfilling_spheres(
                 1.15 * (1.0 - factor)
             }
         };
-        
+
         for (child_of, mut transform) in visual_query.iter_mut() {
             if child_of.0 == fulfilling_entity {
                 transform.scale = Vec3::splat(scale);

@@ -9,7 +9,7 @@ pub enum AppState {
     GameOver,
 }
 
-use bevy_rapier3d::prelude::{RigidBody, ActiveEvents, Velocity};
+use bevy_rapier3d::prelude::{ActiveEvents, RigidBody, Velocity};
 
 #[derive(Component)]
 pub struct Sphere {
@@ -26,7 +26,6 @@ pub struct LossTracker {
 
 #[derive(Component)]
 pub struct Fulfilling;
-
 
 #[derive(Resource, Clone)]
 pub struct GameSettings {
@@ -102,7 +101,6 @@ impl Default for ActiveFulfillment {
     }
 }
 
-
 pub fn check_loss_condition(
     mut commands: Commands,
     time: Res<Time>,
@@ -137,7 +135,14 @@ pub fn check_order_fulfillment(
     mut score: ResMut<Score>,
     mut active_order: ResMut<ActiveOrder>,
     mut fulfillment: ResMut<ActiveFulfillment>,
-    sphere_query: Query<(Entity, &Sphere), (Without<InsideLauncher>, Without<crate::physics::MergeCooldown>, Without<Fulfilling>)>,
+    sphere_query: Query<
+        (Entity, &Sphere),
+        (
+            Without<InsideLauncher>,
+            Without<crate::physics::MergeCooldown>,
+            Without<Fulfilling>,
+        ),
+    >,
 ) {
     if let Some(entity) = fulfillment.entity {
         fulfillment.timer.tick(time.delta());
@@ -169,7 +174,8 @@ pub fn check_order_fulfillment(
                 fulfillment.timer.reset();
 
                 // Mark sphere as fulfilling, lock it in place as fixed/static, but keep the collider active
-                commands.entity(entity)
+                commands
+                    .entity(entity)
                     .insert(Fulfilling)
                     .insert(RigidBody::Fixed)
                     .remove::<ActiveEvents>()
@@ -203,6 +209,7 @@ pub fn reset_game_state(
     sphere_query: Query<Entity, With<Sphere>>,
     children_query: Query<&Children>,
 ) {
+    info!("Resetting game state!");
     // Despawn all gameplay spheres
     for entity in sphere_query.iter() {
         despawn_recursive_custom(&mut commands, entity, &children_query);
@@ -367,7 +374,11 @@ mod tests {
 
         // Sphere should still exist but have Fulfilling component
         assert!(app.world().get_entity(sphere_entity).is_ok());
-        assert!(app.world().entity(sphere_entity).get::<Fulfilling>().is_some());
+        assert!(app
+            .world()
+            .entity(sphere_entity)
+            .get::<Fulfilling>()
+            .is_some());
 
         // Advance time by 1.3 seconds to complete the 1.2s fulfillment
         app.world_mut()
@@ -389,5 +400,87 @@ mod tests {
         // ActiveOrder should rotate to new target in scaled pool [6, 8] for completed_orders = 1
         let order = app.world().resource::<ActiveOrder>();
         assert!(order.target_tier >= 6 && order.target_tier <= 8);
+    }
+
+    #[test]
+    fn test_restart_from_game_over() {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(GameSettings {
+            launcher_z: 12.0,
+            ..default()
+        });
+        app.insert_resource(Score::default());
+        app.insert_resource(ActiveOrder { target_tier: 6 });
+        app.insert_resource(DispenserQueue {
+            current: 1,
+            next: 2,
+        });
+        app.insert_resource(ActiveFulfillment::default());
+
+        app.add_systems(OnEnter(AppState::MainMenu), reset_game_state);
+        app.add_systems(Update, check_loss_condition);
+
+        // Transition to InGame so we don't trigger reset_game_state on the first update
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::InGame
+        );
+
+        // Spawn a sphere past the launcher line
+        let sphere_entity = app
+            .world_mut()
+            .spawn((Sphere { tier: 1 }, Transform::from_xyz(0.0, 0.0, 12.5)))
+            .id();
+
+        // 1. Tick: adds LossTracker
+        app.update();
+        assert!(app
+            .world()
+            .entity(sphere_entity)
+            .get::<LossTracker>()
+            .is_some());
+
+        // 2. Advance time past 0.5s to trigger GameOver
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs_f32(0.6));
+        app.update(); // Set next state to GameOver
+        app.update(); // Transition to GameOver
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::GameOver
+        );
+
+        // 3. Now transition back to MainMenu (simulating restart)
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::MainMenu);
+
+        // This update should run StateTransition schedule, which transitions to MainMenu,
+        // runs reset_game_state on OnEnter(MainMenu), and flushes commands.
+        app.update();
+
+        // Verify state is MainMenu
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::MainMenu
+        );
+
+        // Verify the sphere is despawned
+        assert!(app.world().get_entity(sphere_entity).is_err());
+
+        // Run another update to ensure it does not immediately transition back to GameOver
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::MainMenu
+        );
     }
 }

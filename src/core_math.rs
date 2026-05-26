@@ -24,10 +24,10 @@ pub fn get_order_points(target_tier: u8) -> u32 {
 pub fn get_random_dispensed_tier<R: rand::Rng>(rng: &mut R) -> u8 {
     let roll = rng.random_range(0..100);
     match roll {
-        0..40  => 1,
+        0..40 => 1,
         40..72 => 2,
         72..90 => 3,
-        _      => 4,
+        _ => 4,
     }
 }
 

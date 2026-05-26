@@ -1,6 +1,6 @@
+use crate::game_state::{GameSettings, InsideLauncher, Sphere};
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
-use crate::game_state::{GameSettings, Sphere, InsideLauncher};
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct LauncherPreview;
@@ -32,18 +32,17 @@ pub struct LauncherPlugin;
 
 impl Plugin for LauncherPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LauncherState>()
-            .add_systems(
-                Update,
-                (
-                    update_launcher_aiming,
-                    check_launcher_obstructions,
-                    handle_launch_input,
-                    update_launcher_preview_visuals,
-                )
-                    .chain()
-                    .run_if(not(in_state(crate::game_state::AppState::GameOver))),
-            );
+        app.init_resource::<LauncherState>().add_systems(
+            Update,
+            (
+                update_launcher_aiming,
+                check_launcher_obstructions,
+                handle_launch_input,
+                update_launcher_preview_visuals,
+            )
+                .chain()
+                .run_if(not(in_state(crate::game_state::AppState::GameOver))),
+        );
     }
 }
 
@@ -57,7 +56,13 @@ pub fn update_launcher_aiming(
     window_query: Query<&Window>,
     settings: Res<GameSettings>,
     dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
-    sphere_query: Query<(&Transform, &Sphere, Option<&Velocity>), (Without<InsideLauncher>, Without<crate::game_state::Fulfilling>)>,
+    sphere_query: Query<
+        (&Transform, &Sphere, Option<&Velocity>),
+        (
+            Without<InsideLauncher>,
+            Without<crate::game_state::Fulfilling>,
+        ),
+    >,
     mut launcher_state: ResMut<LauncherState>,
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -117,7 +122,8 @@ pub fn update_launcher_aiming(
 
         if keyboard_dir != 0.0 {
             let keyboard_speed = 8.0; // speed units per second
-            clamped_x = (clamped_x + keyboard_dir * keyboard_speed * time.delta_secs()).clamp(-limit_x, limit_x);
+            clamped_x = (clamped_x + keyboard_dir * keyboard_speed * time.delta_secs())
+                .clamp(-limit_x, limit_x);
         }
     }
 
