@@ -229,7 +229,6 @@ fn on_sphere_added(
     trigger: On<Add, Sphere>,
     sphere_query: Query<&Sphere>,
     tier_mats: Option<Res<TierMaterials>>,
-    colorblind: Option<Res<ColorblindMode>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
@@ -240,7 +239,6 @@ fn on_sphere_added(
     let Some(tier_mats) = tier_mats else {
         return;
     };
-    let cb = colorblind.map(|r| r.0).unwrap_or(false);
     let radius = get_radius(sphere.tier);
     let mat = material_for_tier(sphere.tier, false, &tier_mats);
     let mesh = meshes.add(
@@ -248,12 +246,6 @@ fn on_sphere_added(
             .mesh()
             .uv(32, 18),
     );
-
-    let initial_visibility = if cb {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
 
     // Spawn 3D visual mesh child entity offset by radius in Y
     commands.entity(entity).with_children(|parent| {
@@ -277,7 +269,7 @@ fn on_sphere_added(
         TextLayout::new_with_justify(Justify::Center),
         bevy::text::LineHeight::Px(22.0),
         Transform::from_xyz(0.0, 0.0, 10.0), // Z coordinate in 2D space
-        initial_visibility,
+        Visibility::Hidden,
     ));
 }
 
