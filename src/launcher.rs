@@ -57,7 +57,7 @@ pub fn update_launcher_aiming(
     window_query: Query<&Window>,
     settings: Res<GameSettings>,
     dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
-    sphere_query: Query<(&Transform, &Sphere), (Without<InsideLauncher>, Without<crate::game_state::Fulfilling>)>,
+    sphere_query: Query<(&Transform, &Sphere, Option<&Velocity>), (Without<InsideLauncher>, Without<crate::game_state::Fulfilling>)>,
     mut launcher_state: ResMut<LauncherState>,
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -126,7 +126,13 @@ pub fn update_launcher_aiming(
 
     // Compute 1D forbidden intervals on the launcher line (Z = settings.launcher_z)
     let mut intervals: Vec<(f32, f32)> = Vec::new();
-    for (sphere_transform, sphere) in sphere_query.iter() {
+    for (sphere_transform, sphere, velocity) in sphere_query.iter() {
+        if let Some(vel) = velocity {
+            if vel.linear.z < -0.5 {
+                // Sphere is moving away from the launcher, ignore it for aiming obstruction snap calculations
+                continue;
+            }
+        }
         let sphere_radius = crate::core_math::get_radius(sphere.tier);
         let dz = (settings.launcher_z - sphere_transform.translation.z).abs();
         let r_sum = preview_radius + sphere_radius;
