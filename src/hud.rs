@@ -231,7 +231,7 @@ fn setup_hud(mut commands: Commands) {
                         .with_children(|btn| {
                             btn.spawn((
                                 AimGuideButtonText,
-                                Text::new("Aim Line: OFF"),
+                                Text::new("Aim Line: ON"),
                                 TextFont {
                                     font_size: 16.0,
                                     ..default()

@@ -64,7 +64,7 @@ pub struct AimLineMode(pub bool);
 
 impl Default for AimLineMode {
     fn default() -> Self {
-        Self(false)
+        Self(true)
     }
 }
 
