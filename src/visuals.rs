@@ -247,13 +247,13 @@ fn on_sphere_added(
             .uv(32, 18),
     );
 
-    // Spawn 3D visual mesh child entity offset by radius in Y
+    // Spawn 3D visual mesh child entity centered at parent
     commands.entity(entity).with_children(|parent| {
         parent.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(mat),
             SphereVisual,
-            Transform::from_xyz(0.0, radius, 0.0),
+            Transform::from_xyz(0.0, 0.0, 0.0),
         ));
     });
 
