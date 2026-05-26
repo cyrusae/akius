@@ -35,13 +35,15 @@ impl Plugin for LauncherPlugin {
         app.init_resource::<LauncherState>().add_systems(
             Update,
             (
-                update_launcher_aiming,
-                check_launcher_obstructions,
-                handle_launch_input,
+                (
+                    update_launcher_aiming,
+                    check_launcher_obstructions,
+                    handle_launch_input,
+                )
+                    .chain()
+                    .run_if(in_state(crate::game_state::AppState::InGame)),
                 update_launcher_preview_visuals,
-            )
-                .chain()
-                .run_if(not(in_state(crate::game_state::AppState::GameOver))),
+            ),
         );
     }
 }
@@ -141,7 +143,7 @@ pub fn update_launcher_aiming(
         }
         let sphere_radius = crate::core_math::get_radius(sphere.tier);
         let dz = (settings.launcher_z - sphere_transform.translation.z).abs();
-        let r_sum = preview_radius + sphere_radius;
+        let r_sum = preview_radius + sphere_radius + 0.02; // Added 0.02 units visual padding buffer
         if dz < r_sum {
             // Overlap is possible along X
             let dx_max = (r_sum * r_sum - dz * dz).sqrt();
@@ -166,12 +168,22 @@ pub fn update_launcher_aiming(
         }
     }
 
-    // Adjust target X if it lies within a forbidden interval
+    // Adjust target X if it lies within a forbidden interval.
+    // Snap only to options that are within the [-limit_x, limit_x] table boundaries.
     for (a, b) in merged_intervals {
         if clamped_x > a && clamped_x < b {
-            if (clamped_x - a).abs() < (clamped_x - b).abs() {
+            let left_valid = a >= -limit_x;
+            let right_valid = b <= limit_x;
+
+            if left_valid && right_valid {
+                if (clamped_x - a).abs() < (clamped_x - b).abs() {
+                    clamped_x = a;
+                } else {
+                    clamped_x = b;
+                }
+            } else if left_valid {
                 clamped_x = a;
-            } else {
+            } else if right_valid {
                 clamped_x = b;
             }
         }
@@ -223,7 +235,8 @@ pub fn check_launcher_obstructions(
     launcher_state.obstructed = obstructed;
 }
 
-/// Ticks cooldown and spawns sphere on Left click or Space bar when unobstructed
+/// Ticks cooldown and spawns sphere on Left click or Space bar when unobstructed.
+/// Prevents launching during active sphere merge animations.
 pub fn handle_launch_input(
     mut commands: Commands,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
@@ -233,6 +246,7 @@ pub fn handle_launch_input(
     mut launcher_state: ResMut<LauncherState>,
     time: Res<Time>,
     interaction_query: Query<&Interaction>,
+    merge_cooldowns: Query<(), With<crate::physics::MergeCooldown>>,
 ) {
     launcher_state.cooldown_timer.tick(time.delta());
 
@@ -240,7 +254,9 @@ pub fn handle_launch_input(
     let fire_pressed = (mouse_button_input.just_pressed(MouseButton::Left) && !over_ui)
         || keyboard_input.just_pressed(KeyCode::Space);
 
-    if fire_pressed && launcher_state.cooldown_timer.is_finished() {
+    let merge_active = !merge_cooldowns.is_empty();
+
+    if fire_pressed && launcher_state.cooldown_timer.is_finished() && !merge_active {
         let current_tier = dispenser_queue.as_ref().map(|dq| dq.current).unwrap_or(1);
         let launch_position = Vec3::new(launcher_state.active_x, 0.0, settings.launcher_z);
         let launch_velocity = Vec3::new(0.0, 0.0, -settings.launch_speed);
@@ -266,11 +282,20 @@ pub fn update_launcher_preview_visuals(
     launcher_state: Res<LauncherState>,
     settings: Res<GameSettings>,
     dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
+    state: Option<Res<State<crate::game_state::AppState>>>,
     mut preview_query: Query<(&mut Transform, &mut Visibility), With<LauncherPreview>>,
 ) {
     let Ok((mut transform, mut visibility)) = preview_query.single_mut() else {
         return;
     };
+
+    let is_in_game = state.map(|s| *s.get() == crate::game_state::AppState::InGame).unwrap_or(false);
+    if !is_in_game {
+        if *visibility != Visibility::Hidden {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
 
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
     let radius = crate::core_math::get_radius(current_tier);
@@ -281,9 +306,13 @@ pub fn update_launcher_preview_visuals(
     // Hide preview sphere during the first part of the cooldown for a smoother spawning feel
     let elapsed = launcher_state.cooldown_timer.elapsed_secs();
     if !launcher_state.cooldown_timer.is_finished() && elapsed < 0.4 {
-        *visibility = Visibility::Hidden;
+        if *visibility != Visibility::Hidden {
+            *visibility = Visibility::Hidden;
+        }
     } else {
-        *visibility = Visibility::Visible;
+        if *visibility != Visibility::Visible {
+            *visibility = Visibility::Visible;
+        }
     }
 }
 
@@ -398,7 +427,7 @@ mod tests {
         let mut found = false;
         for (_entity, sphere, transform, velocity) in query.iter(app.world()) {
             if sphere.tier == 3 {
-                assert_eq!(transform.translation, Vec3::new(2.0, 0.0, 12.0));
+                assert_eq!(transform.translation, Vec3::new(2.0, crate::core_math::get_radius(3), 12.0));
                 assert_eq!(velocity.linear, Vec3::new(0.0, 0.0, -15.0));
                 found = true;
             }

@@ -37,7 +37,7 @@ fn main() {
         .insert_resource(game_state::ActiveFulfillment::default())
         .add_systems(Startup, setup_camera_and_light)
         .add_systems(
-            OnEnter(game_state::AppState::MainMenu),
+            OnEnter(game_state::AppState::InGame),
             game_state::reset_game_state,
         )
         .add_systems(
@@ -46,7 +46,7 @@ fn main() {
                 game_state::check_loss_condition,
                 game_state::check_order_fulfillment,
             )
-                .run_if(not(in_state(game_state::AppState::GameOver))),
+                .run_if(in_state(game_state::AppState::InGame)),
         )
         .run();
 }

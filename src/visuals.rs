@@ -8,17 +8,16 @@ use bevy_rapier3d::prelude::Collider;
 // Tier color palette — warm perceptual gradient, violet → sky blue → lime →
 // orange → gold, designed to be distinct across 10 steps.
 // ---------------------------------------------------------------------------
-pub const TIER_COLORS: [Color; 10] = [
+pub const TIER_COLORS: [Color; 9] = [
     Color::hsl(270.0, 0.70, 0.55), // Tier  1 — violet
     Color::hsl(225.0, 0.65, 0.60), // Tier  2 — blue
     Color::hsl(195.0, 0.70, 0.55), // Tier  3 — sky blue
-    Color::hsl(165.0, 0.65, 0.50), // Tier  4 — teal
-    Color::hsl(120.0, 0.60, 0.45), // Tier  5 — green
-    Color::hsl(80.0, 0.65, 0.48),  // Tier  6 — yellow-green
-    Color::hsl(50.0, 0.80, 0.52),  // Tier  7 — amber
-    Color::hsl(20.0, 0.85, 0.52),  // Tier  8 — orange
-    Color::hsl(0.0, 0.78, 0.52),   // Tier  9 — red
-    Color::hsl(45.0, 0.90, 0.55),  // Tier 10 — gold (max)
+    Color::hsl(150.0, 0.65, 0.50), // Tier  4 — teal/greenish
+    Color::hsl(110.0, 0.60, 0.45), // Tier  5 — green
+    Color::hsl(60.0, 0.75, 0.50),  // Tier  6 — yellow/amber
+    Color::hsl(25.0, 0.85, 0.52),  // Tier  7 — orange
+    Color::hsl(0.0, 0.85, 0.52),   // Tier  8 — red (max regular)
+    Color::hsl(45.0, 0.95, 0.55),  // Tier  9 — gold (secret win)
 ];
 
 // ---------------------------------------------------------------------------
@@ -48,10 +47,10 @@ pub struct AimGuideLine;
 /// Pre-built material handles for each tier.
 #[derive(Resource)]
 pub struct TierMaterials {
-    pub normal: [Handle<StandardMaterial>; 10],
+    pub normal: [Handle<StandardMaterial>; 9],
 }
 
-/// Build all 10 tier materials.
+/// Build all 9 tier materials.
 fn build_tier_materials(materials: &mut Assets<StandardMaterial>) -> TierMaterials {
     let normal = std::array::from_fn(|i| {
         let color = TIER_COLORS[i];
@@ -72,7 +71,7 @@ pub fn material_for_tier(
     _colorblind: bool,
     tier_mats: &TierMaterials,
 ) -> Handle<StandardMaterial> {
-    let idx = (tier as usize).saturating_sub(1).min(9);
+    let idx = (tier as usize).saturating_sub(1).min(8);
     tier_mats.normal[idx].clone()
 }
 
@@ -139,6 +138,7 @@ fn setup_visuals(
         Mesh3d(meshes.add(Cuboid::new(settings.arena_width, 0.1, depth))),
         MeshMaterial3d(floor_mat),
         Transform::from_xyz(0.0, -0.05, center_z),
+        Collider::cuboid(settings.arena_width * 0.5, 0.05, depth * 0.5),
     ));
 
     // ---- Left wall ----
@@ -325,6 +325,12 @@ fn update_labels_screen_position(
     for (label, mut label_transform, mut visibility) in label_query.iter_mut() {
         if let Ok((sphere_entity, sphere_transform, sphere)) = sphere_query.get(label.0) {
             let sphere_pos = sphere_transform.translation;
+            if sphere_pos.y < -0.1 {
+                if *visibility != Visibility::Hidden {
+                    *visibility = Visibility::Hidden;
+                }
+                continue;
+            }
             let radius = get_radius(sphere.tier);
 
             // Project a point at the visual center of the sphere in world space
@@ -492,10 +498,12 @@ fn handle_keyboard_toggles(
 fn update_aim_guide_line(
     aim_line_mode: Res<AimLineMode>,
     launcher_state: Res<LauncherState>,
+    state: Option<Res<State<crate::game_state::AppState>>>,
     mut query: Query<(&mut Transform, &mut Visibility), With<AimGuideLine>>,
 ) {
     if let Ok((mut transform, mut visibility)) = query.single_mut() {
-        if aim_line_mode.0 {
+        let is_in_game = state.map(|s| *s.get() == crate::game_state::AppState::InGame).unwrap_or(false);
+        if aim_line_mode.0 && is_in_game {
             if *visibility != Visibility::Visible {
                 *visibility = Visibility::Visible;
             }

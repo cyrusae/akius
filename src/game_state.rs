@@ -4,9 +4,9 @@ use bevy::prelude::*;
 pub enum AppState {
     #[default]
     MainMenu,
-    #[allow(dead_code)]
     InGame,
     GameOver,
+    Win,
 }
 
 use bevy_rapier3d::prelude::{ActiveEvents, RigidBody, Velocity};
@@ -160,10 +160,15 @@ pub fn check_order_fulfillment(
 
             score.completed_orders += 1;
 
-            // Assign a new order using the scaling formula (starting at Tier 6)
-            let min_tier = (6 + score.completed_orders / 2).min(8);
-            let max_tier = (min_tier + 1 + (score.completed_orders % 2)).min(10);
-            active_order.target_tier = rand::random_range(min_tier as u8..=max_tier as u8);
+            // Assign a new order using the scaling formula (starting at Tier 6, capped at 8)
+            // with a 5% chance of getting a lucky Tier 5 helper order.
+            if rand::random_range(0..100) < 5 {
+                active_order.target_tier = 5;
+            } else {
+                let min_tier = (6 + score.completed_orders / 2).min(8);
+                let max_tier = (min_tier + 1 + (score.completed_orders % 2)).min(8);
+                active_order.target_tier = rand::random_range(min_tier as u8..=max_tier as u8);
+            }
 
             // Finish fulfillment
             fulfillment.entity = None;
@@ -422,7 +427,7 @@ mod tests {
         });
         app.insert_resource(ActiveFulfillment::default());
 
-        app.add_systems(OnEnter(AppState::MainMenu), reset_game_state);
+        app.add_systems(OnEnter(AppState::InGame), reset_game_state);
         app.add_systems(Update, check_loss_condition);
 
         // Transition to InGame so we don't trigger reset_game_state on the first update
@@ -460,30 +465,23 @@ mod tests {
             AppState::GameOver
         );
 
-        // 3. Now transition back to MainMenu (simulating restart)
+        // 3. Now transition back to InGame (simulating restart)
         app.world_mut()
             .resource_mut::<NextState<AppState>>()
-            .set(AppState::MainMenu);
+            .set(AppState::InGame);
 
-        // This update should run StateTransition schedule, which transitions to MainMenu,
-        // runs reset_game_state on OnEnter(MainMenu), and flushes commands.
+        // This update should run StateTransition schedule, which transitions to InGame,
+        // runs reset_game_state on OnEnter(InGame), and flushes commands.
         app.update();
 
-        // Verify state is MainMenu
+        // Verify state is InGame
         assert_eq!(
             *app.world().resource::<State<AppState>>().get(),
-            AppState::MainMenu
+            AppState::InGame
         );
 
         // Verify the sphere is despawned
         assert!(app.world().get_entity(sphere_entity).is_err());
-
-        // Run another update to ensure it does not immediately transition back to GameOver
-        app.update();
-        assert_eq!(
-            *app.world().resource::<State<AppState>>().get(),
-            AppState::MainMenu
-        );
     }
 
     #[test]

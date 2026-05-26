@@ -46,10 +46,11 @@ impl Plugin for PhysicsPlugin {
 pub fn spawn_sphere_entity<'a>(
     commands: &'a mut Commands,
     tier: u8,
-    translation: Vec3,
+    mut translation: Vec3,
     velocity: Vec3,
 ) -> bevy::ecs::system::EntityCommands<'a> {
     let radius = crate::core_math::get_radius(tier);
+    translation.y = radius;
     // Scale density so smaller spheres are significantly denser and heavier,
     // giving them more relative mass to nudge larger spheres.
     let density = 15.0 / (tier as f32).powf(0.8);
@@ -136,8 +137,8 @@ pub fn check_distance_merges(
                 let r1 = crate::core_math::get_radius(s1.tier);
                 let r2 = crate::core_math::get_radius(s2.tier);
 
-                // Merge if distance is within the sum of radii + 0.05 units buffer
-                let threshold = r1 + r2 + 0.05;
+                // Merge if distance is within the sum of radii + 0.07 units buffer
+                let threshold = r1 + r2 + 0.07;
                 let dist = t1.translation.distance(t2.translation);
 
                 if dist < threshold {
@@ -161,6 +162,7 @@ pub fn resolve_merges(
     mut merge_events: MessageReader<MergeEvent>,
     mut score: ResMut<Score>,
     sphere_query: Query<(&Sphere, &Transform, &Velocity)>,
+    mut next_state: Option<ResMut<NextState<crate::game_state::AppState>>>,
 ) {
     let mut merged_this_frame = HashSet::new();
     for event in merge_events.read() {
@@ -176,7 +178,7 @@ pub fn resolve_merges(
         if let (Ok((s1, t1, v1)), Ok((s2, t2, v2))) = (sphere_query.get(e1), sphere_query.get(e2)) {
             if s1.tier == s2.tier {
                 let current_tier = s1.tier;
-                if current_tier >= 10 {
+                if current_tier >= 9 {
                     continue; // Maximum tier achieved, cannot merge further
                 }
 
@@ -208,13 +210,21 @@ pub fn resolve_merges(
                 let mut cmd =
                     spawn_sphere_entity(&mut commands, next_tier, midpoint, merged_velocity);
                 cmd.insert(MergeCooldown {
-                    timer: Timer::from_seconds(0.2, TimerMode::Once),
+                    timer: Timer::from_seconds(0.35, TimerMode::Once),
                 });
 
                 // Add points and record peak tier
                 score.total += crate::core_math::get_merge_points(next_tier);
                 if next_tier > score.peak_tier {
                     score.peak_tier = next_tier;
+                }
+
+                // Secret win condition triggered: merging two Tier 8s to form Tier 9
+                if next_tier == 9 {
+                    info!("Secret Win Condition reached! Transitioning to AppState::Win");
+                    if let Some(ref mut ns) = next_state {
+                        ns.set(crate::game_state::AppState::Win);
+                    }
                 }
             }
         }
@@ -266,13 +276,14 @@ pub fn spill_spheres(
 }
 
 /// Unlocks the Y-translation and all rotations for all active spheres on the board
-/// when the game transitions to AppState::GameOver, causing a complete cascade cascade.
+/// and applies a positive Z-velocity push when the game transitions to AppState::GameOver.
 pub fn unlock_all_spheres_on_game_over(
     mut commands: Commands,
-    sphere_query: Query<Entity, With<Sphere>>,
+    mut sphere_query: Query<(Entity, &mut Velocity), With<Sphere>>,
 ) {
-    for entity in sphere_query.iter() {
+    for (entity, mut velocity) in sphere_query.iter_mut() {
         commands.entity(entity).insert(LockedAxes::empty());
+        velocity.linear.z = 2.0;
     }
 }
 
@@ -390,7 +401,7 @@ mod tests {
 
         for (_ent, sphere, transform, velocity) in query.iter(app.world()) {
             if sphere.tier == 2 {
-                assert_eq!(transform.translation, Vec3::new(1.0, 0.0, 0.0)); // Midpoint of (0,0,0) and (2,0,0)
+                assert_eq!(transform.translation, Vec3::new(1.0, crate::core_math::get_radius(2), 0.0)); // Midpoint of (0,0,0) and (2,0,0)
                 assert_eq!(velocity.linear, Vec3::new(0.0, 0.0, 0.0)); // 50% of (10 - 10)
                 found = true;
             }

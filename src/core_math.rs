@@ -1,7 +1,7 @@
-/// Returns the physical radius of a sphere given its tier (1-10).
-/// Clamps input to the valid range [1, 10].
+/// Returns the physical radius of a sphere given its tier (1-9).
+/// Clamps input to the valid range [1, 9].
 pub fn get_radius(tier: u8) -> f32 {
-    let clamped_tier = tier.clamp(1, 10);
+    let clamped_tier = tier.clamp(1, 9);
     // Tier 1 radius = 0.5. Each subsequent tier scales by 1.21.
     0.5 * 1.21f32.powi(clamped_tier as i32 - 1)
 }
@@ -42,17 +42,17 @@ mod tests {
         // Tier 1 should be exactly 0.5
         assert_eq!(get_radius(1), 0.5);
 
-        // Tier 10 should be approx 2.78
-        let r10 = get_radius(10);
+        // Tier 9 should be approx 2.30
+        let r9 = get_radius(9);
         assert!(
-            (r10 - 2.780).abs() < 0.01,
-            "Expected r10 to be ~2.78, got {}",
-            r10
+            (r9 - 2.298).abs() < 0.01,
+            "Expected r9 to be ~2.30, got {}",
+            r9
         );
 
         // Out-of-bounds values should clamp gracefully
         assert_eq!(get_radius(0), get_radius(1));
-        assert_eq!(get_radius(11), get_radius(10));
+        assert_eq!(get_radius(10), get_radius(9));
     }
 
     #[test]
