@@ -11,6 +11,7 @@ pub struct LauncherState {
     pub target_x: f32,
     pub obstructed: bool,
     pub cooldown_timer: Timer,
+    pub last_cursor_position: Option<Vec2>,
 }
 
 impl Default for LauncherState {
@@ -22,6 +23,7 @@ impl Default for LauncherState {
             target_x: 0.0,
             obstructed: false,
             cooldown_timer,
+            last_cursor_position: None,
         }
     }
 }
@@ -47,6 +49,9 @@ impl Plugin for LauncherPlugin {
 
 /// Updates the aiming position by raycasting the screen cursor coordinates onto the Y=0 plane
 /// and constraining the X coordinate to prevent the preview sphere from overlapping existing spheres.
+/// Updates the aiming position by raycasting the screen cursor coordinates onto the Y=0 plane
+/// and constraining the X coordinate to prevent the preview sphere from overlapping existing spheres.
+/// Also handles A/D and Left/Right keyboard movement as alternative inputs.
 pub fn update_launcher_aiming(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window>,
@@ -54,39 +59,70 @@ pub fn update_launcher_aiming(
     dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
     sphere_query: Query<(&Transform, &Sphere), (Without<InsideLauncher>, Without<crate::game_state::Fulfilling>)>,
     mut launcher_state: ResMut<LauncherState>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
 ) {
-    let Ok(window) = window_query.single() else {
-        return;
-    };
-    let Some(cursor_position) = window.cursor_position() else {
-        return;
-    };
-    let Ok((camera, camera_transform)) = camera_query.single() else {
-        return;
-    };
-
-    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
-        return;
-    };
-
-    let dir_y = ray.direction.y;
-    if dir_y.abs() < 1e-6 {
-        return;
-    }
-
-    let t = -ray.origin.y / dir_y;
-    if t < 0.0 {
-        return;
-    }
-
-    let intersection_point = ray.origin + t * *ray.direction;
     let half_width = settings.arena_width * 0.5;
-
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
     let preview_radius = crate::core_math::get_radius(current_tier);
     let limit_x = (half_width - preview_radius).max(0.0);
-    let mut clamped_x = intersection_point.x.clamp(-limit_x, limit_x);
+
+    // 1. Get cursor position and check if it moved
+    let mut new_target_x = None;
+    let mut current_cursor_position = None;
+
+    if let Ok(window) = window_query.single() {
+        if let Some(cursor_pos) = window.cursor_position() {
+            current_cursor_position = Some(cursor_pos);
+            if let Ok((camera, camera_transform)) = camera_query.single() {
+                if let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) {
+                    let dir_y = ray.direction.y;
+                    if dir_y.abs() >= 1e-6 {
+                        let t = -ray.origin.y / dir_y;
+                        if t >= 0.0 {
+                            let intersection_point = ray.origin + t * *ray.direction;
+                            new_target_x = Some(intersection_point.x.clamp(-limit_x, limit_x));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let cursor_moved = if let Some(pos) = current_cursor_position {
+        if let Some(last_pos) = launcher_state.last_cursor_position {
+            (pos - last_pos).length_squared() > 1e-4
+        } else {
+            true
+        }
+    } else {
+        false
+    };
+
+    // 2. Decide target_x source (cursor vs keyboard)
+    let mut clamped_x = launcher_state.target_x;
+    if cursor_moved {
+        if let Some(x) = new_target_x {
+            clamped_x = x;
+        }
+    } else {
+        // Read keyboard input
+        let mut keyboard_dir = 0.0;
+        if keyboard.pressed(KeyCode::KeyA) || keyboard.pressed(KeyCode::ArrowLeft) {
+            keyboard_dir -= 1.0;
+        }
+        if keyboard.pressed(KeyCode::KeyD) || keyboard.pressed(KeyCode::ArrowRight) {
+            keyboard_dir += 1.0;
+        }
+
+        if keyboard_dir != 0.0 {
+            let keyboard_speed = 8.0; // speed units per second
+            clamped_x = (clamped_x + keyboard_dir * keyboard_speed * time.delta_secs()).clamp(-limit_x, limit_x);
+        }
+    }
+
+    // Always update last cursor position
+    launcher_state.last_cursor_position = current_cursor_position;
 
     // Compute 1D forbidden intervals on the launcher line (Z = settings.launcher_z)
     let mut intervals: Vec<(f32, f32)> = Vec::new();
@@ -175,10 +211,11 @@ pub fn check_launcher_obstructions(
     launcher_state.obstructed = obstructed;
 }
 
-/// Ticks cooldown and spawns sphere on Left click when unobstructed
+/// Ticks cooldown and spawns sphere on Left click or Space bar when unobstructed
 pub fn handle_launch_input(
     mut commands: Commands,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
     settings: Res<GameSettings>,
     dispenser_queue: Option<ResMut<crate::game_state::DispenserQueue>>,
     mut launcher_state: ResMut<LauncherState>,
@@ -186,9 +223,10 @@ pub fn handle_launch_input(
 ) {
     launcher_state.cooldown_timer.tick(time.delta());
 
-    if mouse_button_input.just_pressed(MouseButton::Left)
-        && launcher_state.cooldown_timer.is_finished()
-    {
+    let fire_pressed = mouse_button_input.just_pressed(MouseButton::Left)
+        || keyboard_input.just_pressed(KeyCode::Space);
+
+    if fire_pressed && launcher_state.cooldown_timer.is_finished() {
         let current_tier = dispenser_queue.as_ref().map(|dq| dq.current).unwrap_or(1);
         let launch_position = Vec3::new(launcher_state.active_x, 0.0, settings.launcher_z);
         let launch_velocity = Vec3::new(0.0, 0.0, -settings.launch_speed);
@@ -245,6 +283,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.insert_resource(GameSettings::default());
         app.insert_resource(LauncherState::default());
+        app.insert_resource(ButtonInput::<KeyCode>::default());
         app.insert_resource(Time::<()>::default());
 
         let camera_transform = Transform::from_xyz(0.0, 10.0, 0.0).looking_at(Vec3::ZERO, -Vec3::Z);
@@ -328,6 +367,7 @@ mod tests {
             next: 4,
         });
         app.insert_resource(ButtonInput::<MouseButton>::default());
+        app.insert_resource(ButtonInput::<KeyCode>::default());
         app.insert_resource(Time::<()>::default());
         app.add_systems(Update, handle_launch_input);
 
@@ -370,6 +410,7 @@ mod tests {
             next: 2,
         });
         app.insert_resource(ButtonInput::<MouseButton>::default());
+        app.insert_resource(ButtonInput::<KeyCode>::default());
         app.insert_resource(Time::<()>::default());
         app.add_systems(Update, handle_launch_input);
 
