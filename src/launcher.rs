@@ -232,10 +232,12 @@ pub fn handle_launch_input(
     dispenser_queue: Option<ResMut<crate::game_state::DispenserQueue>>,
     mut launcher_state: ResMut<LauncherState>,
     time: Res<Time>,
+    interaction_query: Query<&Interaction>,
 ) {
     launcher_state.cooldown_timer.tick(time.delta());
 
-    let fire_pressed = mouse_button_input.just_pressed(MouseButton::Left)
+    let over_ui = interaction_query.iter().any(|&i| i != Interaction::None);
+    let fire_pressed = (mouse_button_input.just_pressed(MouseButton::Left) && !over_ui)
         || keyboard_input.just_pressed(KeyCode::Space);
 
     if fire_pressed && launcher_state.cooldown_timer.is_finished() {
