@@ -28,6 +28,7 @@ fn main() {
         .insert_resource(game_state::GameSettings::default())
         .insert_resource(game_state::Score::default())
         .insert_resource(game_state::ColorblindMode::default())
+        .insert_resource(game_state::AimLineMode::default())
         .insert_resource(game_state::ActiveOrder { target_tier: 6 })
         .insert_resource(game_state::DispenserQueue { current: 1, next: 2 })
         .insert_resource(game_state::ActiveFulfillment::default())

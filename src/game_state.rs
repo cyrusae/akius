@@ -59,6 +59,16 @@ impl Default for ColorblindMode {
     }
 }
 
+/// Whether the aiming guide line is active.
+#[derive(Resource, Clone, Copy, PartialEq, Eq)]
+pub struct AimLineMode(pub bool);
+
+impl Default for AimLineMode {
+    fn default() -> Self {
+        Self(false)
+    }
+}
+
 #[derive(Resource, Default, Clone)]
 pub struct Score {
     pub total: u32,

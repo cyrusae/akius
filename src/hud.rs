@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use crate::game_state::{Score, ActiveOrder, DispenserQueue, ColorblindMode};
+use crate::game_state::{Score, ActiveOrder, DispenserQueue, ColorblindMode, AimLineMode};
 use crate::visuals::TIER_COLORS;
 
 #[derive(Component)]
@@ -21,6 +21,12 @@ pub struct ColorblindButton;
 pub struct ColorblindButtonText;
 
 #[derive(Component)]
+pub struct AimGuideButton;
+
+#[derive(Component)]
+pub struct AimGuideButtonText;
+
+#[derive(Component)]
 pub struct GameOverScreen;
 
 pub struct HudPlugin;
@@ -37,6 +43,8 @@ impl Plugin for HudPlugin {
                     update_next_sphere_hud,
                     handle_colorblind_button,
                     update_colorblind_button_text,
+                    handle_aim_guide_button,
+                    update_aim_guide_button_text,
                 ),
             )
             .add_systems(OnEnter(crate::game_state::AppState::GameOver), spawn_game_over_screen)
@@ -162,8 +170,35 @@ fn setup_hud(
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::FlexEnd,
             align_items: AlignItems::Center,
+            column_gap: Val::Px(15.0),
             ..default()
         }).with_children(|bottom_row| {
+            // Aim Guide button
+            bottom_row.spawn((
+                AimGuideButton,
+                Button,
+                Node {
+                    width: Val::Px(160.0),
+                    height: Val::Px(45.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BorderColor::all(Color::WHITE),
+                BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+            )).with_children(|btn| {
+                btn.spawn((
+                    AimGuideButtonText,
+                    Text::new("Aim Line: OFF"),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+
             // Colorblind button (Bottom-right)
             bottom_row.spawn((
                 ColorblindButton,
@@ -351,5 +386,39 @@ fn handle_restart_input(
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
         next_state.set(crate::game_state::AppState::MainMenu);
+    }
+}
+
+fn handle_aim_guide_button(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<AimGuideButton>),
+    >,
+    mut aim_line_mode: ResMut<AimLineMode>,
+) {
+    for (interaction, mut bg_color) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                aim_line_mode.0 = !aim_line_mode.0;
+                *bg_color = BackgroundColor(Color::srgb(0.35, 0.35, 0.35));
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.25, 0.25, 0.25));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.15));
+            }
+        }
+    }
+}
+
+fn update_aim_guide_button_text(
+    aim_line_mode: Res<AimLineMode>,
+    mut query: Query<&mut Text, With<AimGuideButtonText>>,
+) {
+    if aim_line_mode.is_changed() {
+        if let Ok(mut text) = query.single_mut() {
+            text.0 = format!("Aim Line: {}", if aim_line_mode.0 { "ON" } else { "OFF" });
+        }
     }
 }

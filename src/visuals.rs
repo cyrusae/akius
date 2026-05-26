@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Collider;
-use crate::game_state::{ColorblindMode, DispenserQueue, GameSettings, Sphere};
+use crate::game_state::{ColorblindMode, DispenserQueue, GameSettings, Sphere, AimLineMode};
 use crate::core_math::get_radius;
-use crate::launcher::LauncherPreview;
+use crate::launcher::{LauncherPreview, LauncherState};
 
 // ---------------------------------------------------------------------------
 // Tier color palette — warm perceptual gradient, violet → sky blue → lime →
@@ -36,6 +36,10 @@ pub struct BillboardLabel(pub Entity);
 /// Tag on a root-level Text2d label entity for the launcher preview sphere.
 #[derive(Component)]
 pub struct PreviewLabel;
+
+/// Tag on the aiming guide line entity.
+#[derive(Component)]
+pub struct AimGuideLine;
 
 // ---------------------------------------------------------------------------
 // Resources
@@ -93,7 +97,8 @@ impl Plugin for VisualPlugin {
                     update_preview_material,
                     update_preview_label,
                     update_labels_screen_position,
-                    handle_keyboard_colorblind_toggle,
+                    handle_keyboard_toggles,
+                    update_aim_guide_line,
                     animate_merged_spawns,
                     animate_fulfilling_spheres,
                     cleanup_orphaned_labels,
@@ -168,6 +173,23 @@ fn setup_visuals(
         MeshMaterial3d(wall_mat),
         Transform::from_xyz(0.0, wh * 0.5, settings.launcher_z - depth - 0.1),
         Collider::cuboid(settings.arena_width * 0.5 + 0.2, wh * 0.5, 0.1),
+    ));
+
+    // ---- Aim guide line ----
+    let guide_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.0, 0.8, 0.0, 0.15), // Faint green
+        perceptual_roughness: 1.0,
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+    commands.spawn((
+        Name::new("Aim Guide Line"),
+        AimGuideLine,
+        Mesh3d(meshes.add(Cuboid::new(0.02, 0.005, depth))),
+        MeshMaterial3d(guide_mat),
+        Transform::from_xyz(0.0, 0.005, center_z),
+        Visibility::Hidden,
     ));
 
 
@@ -424,13 +446,36 @@ fn cleanup_orphaned_labels(
     }
 }
 
-// Toggle colorblind mode via the Keyboard C key.
-fn handle_keyboard_colorblind_toggle(
+// Toggle colorblind mode (Key C) and aiming guide (Key V) via keyboard shortcuts.
+fn handle_keyboard_toggles(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut colorblind: ResMut<ColorblindMode>,
+    mut aim_line_mode: ResMut<AimLineMode>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyC) {
         colorblind.0 = !colorblind.0;
+    }
+    if keyboard.just_pressed(KeyCode::KeyV) {
+        aim_line_mode.0 = !aim_line_mode.0;
+    }
+}
+
+fn update_aim_guide_line(
+    aim_line_mode: Res<AimLineMode>,
+    launcher_state: Res<LauncherState>,
+    mut query: Query<(&mut Transform, &mut Visibility), With<AimGuideLine>>,
+) {
+    if let Ok((mut transform, mut visibility)) = query.single_mut() {
+        if aim_line_mode.0 {
+            if *visibility != Visibility::Visible {
+                *visibility = Visibility::Visible;
+            }
+            transform.translation.x = launcher_state.active_x;
+        } else {
+            if *visibility != Visibility::Hidden {
+                *visibility = Visibility::Hidden;
+            }
+        }
     }
 }
 
