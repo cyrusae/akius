@@ -112,7 +112,9 @@ pub fn check_loss_condition(
     >,
 ) {
     for (entity, transform, loss_tracker) in sphere_query.iter_mut() {
-        if transform.translation.z > settings.launcher_z + 0.2 {
+        let is_past_z = transform.translation.z > settings.launcher_z + 0.2;
+        let is_fallen_y = transform.translation.y < -0.2;
+        if is_past_z || is_fallen_y {
             if let Some(mut tracker) = loss_tracker {
                 tracker.timer.tick(time.delta());
                 if tracker.timer.is_finished() {
@@ -481,6 +483,47 @@ mod tests {
         assert_eq!(
             *app.world().resource::<State<AppState>>().get(),
             AppState::MainMenu
+        );
+    }
+
+    #[test]
+    fn test_loss_condition_fallen_y() {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(GameSettings {
+            launcher_z: 12.0,
+            ..default()
+        });
+        app.add_systems(Update, check_loss_condition);
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update();
+
+        // Spawn a sphere that has rolled past settings.launcher_z (Z = 12.1) but hasn't reached Z = 12.2,
+        // but has dropped vertically (Y = -0.3)
+        let entity = app
+            .world_mut()
+            .spawn((Sphere { tier: 1 }, Transform::from_xyz(0.0, -0.3, 12.1)))
+            .id();
+
+        // Tick 1: should add LossTracker
+        app.update();
+        assert!(app.world().entity(entity).get::<LossTracker>().is_some());
+
+        // Advance time past 0.5s to trigger GameOver
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs_f32(0.6));
+        app.update(); // Set next state to GameOver
+        app.update(); // Transition to GameOver
+
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::GameOver
         );
     }
 }
