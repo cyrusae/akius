@@ -334,7 +334,7 @@ fn update_labels_screen_position(
             let radius = get_radius(sphere.tier);
 
             // Project a point at the visual center of the sphere in world space
-            let world_pos = sphere_pos + Vec3::Y * radius;
+            let world_pos = sphere_pos;
 
             // Analytical ray-sphere occlusion check: is the visual sphere occluded from the camera's perspective?
             let mut occluded = false;
@@ -349,7 +349,7 @@ fn update_labels_screen_position(
                     }
                     let other_radius = get_radius(other_sphere.tier);
                     // The visual center of the other sphere
-                    let other_visual_center = other_transform.translation + Vec3::Y * other_radius;
+                    let other_visual_center = other_transform.translation;
 
                     let v = other_visual_center - cam_pos;
                     let t = v.dot(ray_dir);

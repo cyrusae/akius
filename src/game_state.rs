@@ -160,15 +160,25 @@ pub fn check_order_fulfillment(
 
             score.completed_orders += 1;
 
-            // Assign a new order using the scaling formula (starting at Tier 6, capped at 8)
-            // with a 5% chance of getting a lucky Tier 5 helper order.
-            if rand::random_range(0..100) < 5 {
-                active_order.target_tier = 5;
+            // Assign a new order using a weighted dynamic progression:
+            // - w5 (Tier 5): baseline 5% chance (helper order)
+            // - w8 (Tier 8): starts at 0%, increases by 10% per completed order up to 40% max
+            // - w6 (Tier 6): starts at 60%, decreases by 10% per completed order down to 15% min
+            // - w7 (Tier 7): acts as the remainder to ensure the total weights always sum to exactly 100% (ranges between 35% and 40%)
+            let w8 = (score.completed_orders * 10).min(40);
+            let w6 = (60 as u32).saturating_sub(score.completed_orders * 10).max(15);
+            let w5 = 5;
+
+            let roll = rand::random_range(0..100);
+            active_order.target_tier = if roll < w5 {
+                5
+            } else if roll < w5 + w6 {
+                6
+            } else if roll < w5 + w6 + (100 - w5 - w6 - w8) {
+                7
             } else {
-                let min_tier = (6 + score.completed_orders / 2).min(8);
-                let max_tier = (min_tier + 1 + (score.completed_orders % 2)).min(8);
-                active_order.target_tier = rand::random_range(min_tier as u8..=max_tier as u8);
-            }
+                8
+            };
 
             // Finish fulfillment
             fulfillment.entity = None;
@@ -404,9 +414,9 @@ mod tests {
         assert_eq!(score.peak_tier, 4);
         assert_eq!(score.completed_orders, 1);
 
-        // ActiveOrder should rotate to new target in scaled pool [6, 8] for completed_orders = 1
+        // ActiveOrder should rotate to new target in scaled pool [5, 8] for completed_orders = 1
         let order = app.world().resource::<ActiveOrder>();
-        assert!(order.target_tier >= 6 && order.target_tier <= 8);
+        assert!(order.target_tier >= 5 && order.target_tier <= 8);
     }
 
     #[test]
