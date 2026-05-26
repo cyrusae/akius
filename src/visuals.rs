@@ -431,16 +431,7 @@ fn update_preview_label(
     // Toggle visibility based on colorblind mode AND the preview sphere's visibility
     let is_preview_visible =
         *preview_visibility == Visibility::Visible || *preview_visibility == Visibility::Inherited;
-    let target_visibility = if colorblind.0 && is_preview_visible {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
-    if *visibility != target_visibility {
-        *visibility = target_visibility;
-    }
 
-    // Project coordinates
     if colorblind.0 && is_preview_visible {
         let Ok((camera, cam_transform)) = camera_3d_query.single() else {
             return;
@@ -453,12 +444,28 @@ fn update_preview_label(
 
         let world_pos = preview_transform.translation;
         if let Some(ndc) = camera.world_to_ndc(cam_transform, world_pos) {
-            if ndc.z >= 0.0 && ndc.z <= 1.0 {
+            if ndc.z < 0.0 || ndc.z > 1.0 {
+                if *visibility != Visibility::Hidden {
+                    *visibility = Visibility::Hidden;
+                }
+            } else {
                 let screen_x = ndc.x * win_w * 0.5;
                 let screen_y = ndc.y * win_h * 0.5;
                 label_transform.translation.x = screen_x;
                 label_transform.translation.y = screen_y;
+
+                if *visibility != Visibility::Visible {
+                    *visibility = Visibility::Visible;
+                }
             }
+        } else {
+            if *visibility != Visibility::Hidden {
+                *visibility = Visibility::Hidden;
+            }
+        }
+    } else {
+        if *visibility != Visibility::Hidden {
+            *visibility = Visibility::Hidden;
         }
     }
 }
