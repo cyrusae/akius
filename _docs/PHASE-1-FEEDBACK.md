@@ -230,6 +230,8 @@ The analytical ray–sphere approach is elegant; the O(N²) structure is not.
   screen-space depth (NDC z) is smallest (closest to camera); skip labels
   behind others. This can be done in one O(N log N) sort pass.
 
+> **COMMENT:** *I'm not sure abouot this one, because of the risk of a sphere that's large blocking multiple smaller ones.*
+
 ---
 
 ## 9. `check_order_fulfillment` Weight Formula Is Opaque
