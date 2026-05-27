@@ -66,11 +66,7 @@ fn build_tier_materials(materials: &mut Assets<StandardMaterial>) -> TierMateria
 }
 
 /// Return the correct material handle for a tier (1-indexed).
-pub fn material_for_tier(
-    tier: u8,
-    _colorblind: bool,
-    tier_mats: &TierMaterials,
-) -> Handle<StandardMaterial> {
+pub fn material_for_tier(tier: u8, tier_mats: &TierMaterials) -> Handle<StandardMaterial> {
     let idx = (tier as usize).saturating_sub(1).min(8);
     tier_mats.normal[idx].clone()
 }
@@ -84,8 +80,6 @@ pub struct VisualPlugin;
 impl Plugin for VisualPlugin {
     fn build(&self, app: &mut App) {
         app
-            // Resources
-            .init_resource::<ColorblindMode>()
             // Systems
             .add_systems(Startup, setup_visuals)
             .add_systems(
@@ -100,6 +94,10 @@ impl Plugin for VisualPlugin {
                     animate_fulfilling_spheres,
                     cleanup_orphaned_labels,
                 ),
+            )
+            .add_systems(
+                OnExit(crate::game_state::AppState::InGame),
+                cleanup_launcher_visuals,
             )
             // Observer: fires whenever a Sphere component is added to any entity
             .add_observer(on_sphere_added);
@@ -240,22 +238,25 @@ fn on_sphere_added(
         return;
     };
     let radius = get_radius(sphere.tier);
-    let mat = material_for_tier(sphere.tier, false, &tier_mats);
+    let mat = material_for_tier(sphere.tier, &tier_mats);
     let mesh = meshes.add(
         bevy::math::primitives::Sphere::new(radius)
             .mesh()
             .uv(32, 18),
     );
 
-    // Spawn 3D visual mesh child entity centered at parent
-    commands.entity(entity).with_children(|parent| {
-        parent.spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(mat),
-            SphereVisual,
-            Transform::from_xyz(0.0, 0.0, 0.0),
-        ));
-    });
+    // Spawn 3D visual mesh child entity centered at parent, and add Visibility component on parent
+    commands
+        .entity(entity)
+        .insert(Visibility::default())
+        .with_children(|parent| {
+            parent.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(mat),
+                SphereVisual,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ));
+        });
 
     // Spawn a root-level 2D text label that will be screen-projected on top of 3D
     commands.spawn((
@@ -280,18 +281,16 @@ fn on_sphere_added(
 fn update_preview_material(
     queue: Option<Res<DispenserQueue>>,
     tier_mats: Option<Res<TierMaterials>>,
-    colorblind: Option<Res<ColorblindMode>>,
     mut preview_query: Query<&mut MeshMaterial3d<StandardMaterial>, With<LauncherPreview>>,
 ) {
     let (Some(queue), Some(tier_mats)) = (queue, tier_mats) else {
         return;
     };
-    let cb = colorblind.map(|r| r.0).unwrap_or(false);
 
     let Ok(mut mat_handle) = preview_query.single_mut() else {
         return;
     };
-    *mat_handle = MeshMaterial3d(material_for_tier(queue.current, cb, &tier_mats));
+    *mat_handle = MeshMaterial3d(material_for_tier(queue.current, &tier_mats));
 }
 
 // Project each label's tracked sphere from 3D world space to 2D screen space.
@@ -305,9 +304,7 @@ fn update_labels_screen_position(
     if !colorblind.0 {
         // If colorblind mode is OFF, hide all labels and exit
         for (_, _, mut visibility) in label_query.iter_mut() {
-            if *visibility != Visibility::Hidden {
-                *visibility = Visibility::Hidden;
-            }
+            crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
         }
         return;
     }
@@ -322,13 +319,17 @@ fn update_labels_screen_position(
     let win_h = window.height();
     let cam_pos = cam_transform.translation();
 
+    // Cache active sphere transforms and computed radii to avoid ECS query overhead in inner loop
+    let spheres: Vec<(Entity, Vec3, f32)> = sphere_query
+        .iter()
+        .map(|(e, t, s)| (e, t.translation, get_radius(s.tier)))
+        .collect();
+
     for (label, mut label_transform, mut visibility) in label_query.iter_mut() {
         if let Ok((sphere_entity, sphere_transform, sphere)) = sphere_query.get(label.0) {
             let sphere_pos = sphere_transform.translation;
             if sphere_pos.y < -0.1 {
-                if *visibility != Visibility::Hidden {
-                    *visibility = Visibility::Hidden;
-                }
+                crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
                 continue;
             }
             let radius = get_radius(sphere.tier);
@@ -343,14 +344,10 @@ fn update_labels_screen_position(
             if target_dist > 0.0 {
                 let ray_dir = to_target / target_dist;
 
-                for (other_entity, other_transform, other_sphere) in sphere_query.iter() {
+                for &(other_entity, other_visual_center, other_radius) in &spheres {
                     if other_entity == sphere_entity {
                         continue;
                     }
-                    let other_radius = get_radius(other_sphere.tier);
-                    // The visual center of the other sphere
-                    let other_visual_center = other_transform.translation;
-
                     let v = other_visual_center - cam_pos;
                     let t = v.dot(ray_dir);
                     // Only check spheres that lie between the camera and our target sphere (with a small buffer)
@@ -366,18 +363,14 @@ fn update_labels_screen_position(
             }
 
             if occluded {
-                if *visibility != Visibility::Hidden {
-                    *visibility = Visibility::Hidden;
-                }
+                crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
                 continue;
             }
 
             // Project coordinates
             if let Some(ndc) = camera.world_to_ndc(cam_transform, world_pos) {
                 if ndc.z < 0.0 || ndc.z > 1.0 {
-                    if *visibility != Visibility::Hidden {
-                        *visibility = Visibility::Hidden;
-                    }
+                    crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
                     continue;
                 }
                 // NDC [-1,1] → screen pixels (origin at center for Camera2d)
@@ -386,13 +379,9 @@ fn update_labels_screen_position(
                 label_transform.translation.x = screen_x;
                 label_transform.translation.y = screen_y;
 
-                if *visibility != Visibility::Visible {
-                    *visibility = Visibility::Visible;
-                }
+                crate::utils::set_visibility(&mut visibility, Visibility::Visible);
             } else {
-                if *visibility != Visibility::Hidden {
-                    *visibility = Visibility::Hidden;
-                }
+                crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
             }
         }
     }
@@ -443,28 +432,20 @@ fn update_preview_label(
         let world_pos = preview_transform.translation;
         if let Some(ndc) = camera.world_to_ndc(cam_transform, world_pos) {
             if ndc.z < 0.0 || ndc.z > 1.0 {
-                if *visibility != Visibility::Hidden {
-                    *visibility = Visibility::Hidden;
-                }
+                crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
             } else {
                 let screen_x = ndc.x * win_w * 0.5;
                 let screen_y = ndc.y * win_h * 0.5;
                 label_transform.translation.x = screen_x;
                 label_transform.translation.y = screen_y;
 
-                if *visibility != Visibility::Visible {
-                    *visibility = Visibility::Visible;
-                }
+                crate::utils::set_visibility(&mut visibility, Visibility::Visible);
             }
         } else {
-            if *visibility != Visibility::Hidden {
-                *visibility = Visibility::Hidden;
-            }
+            crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
         }
     } else {
-        if *visibility != Visibility::Hidden {
-            *visibility = Visibility::Hidden;
-        }
+        crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
     }
 }
 
@@ -502,16 +483,35 @@ fn update_aim_guide_line(
     mut query: Query<(&mut Transform, &mut Visibility), With<AimGuideLine>>,
 ) {
     if let Ok((mut transform, mut visibility)) = query.single_mut() {
-        let is_in_game = state.map(|s| *s.get() == crate::game_state::AppState::InGame).unwrap_or(false);
+        let is_in_game = state
+            .map(|s| *s.get() == crate::game_state::AppState::InGame)
+            .unwrap_or(false);
         if aim_line_mode.0 && is_in_game {
-            if *visibility != Visibility::Visible {
-                *visibility = Visibility::Visible;
-            }
+            crate::utils::set_visibility(&mut visibility, Visibility::Visible);
             transform.translation.x = launcher_state.active_x;
         } else {
-            if *visibility != Visibility::Hidden {
-                *visibility = Visibility::Hidden;
-            }
+            crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
+        }
+    }
+}
+
+pub fn compute_merge_scale(elapsed: f32, duration: f32) -> f32 {
+    let t = (elapsed / duration).clamp(0.0, 1.0);
+    0.8 + t * 0.2
+}
+
+pub fn compute_fulfillment_scale(elapsed: f32, duration: f32) -> f32 {
+    let t = (elapsed / duration).clamp(0.0, 1.0);
+    if t < 0.75 {
+        1.0
+    } else {
+        let t_pop = (t - 0.75) / 0.25; // 0.0 .. 1.0
+        if t_pop < 0.4 {
+            let factor = t_pop / 0.4;
+            1.0 + factor * 0.15
+        } else {
+            let factor = (t_pop - 0.4) / 0.6;
+            1.15 * (1.0 - factor)
         }
     }
 }
@@ -528,10 +528,10 @@ pub fn animate_merged_spawns(
             continue; // Skip fulfilling spheres
         }
         if let Ok(cooldown) = cooldown_query.get(parent) {
-            let elapsed = cooldown.timer.elapsed_secs();
-            let duration = cooldown.timer.duration().as_secs_f32();
-            let t = (elapsed / duration).clamp(0.0, 1.0);
-            let scale = 0.8 + t * 0.2;
+            let scale = compute_merge_scale(
+                cooldown.timer.elapsed_secs(),
+                cooldown.timer.duration().as_secs_f32(),
+            );
             transform.scale = Vec3::splat(scale);
         } else {
             if transform.scale != Vec3::ONE {
@@ -545,10 +545,10 @@ pub fn animate_merged_spawns(
             continue; // Skip fulfilling spheres
         }
         if let Ok(cooldown) = cooldown_query.get(parent) {
-            let elapsed = cooldown.timer.elapsed_secs();
-            let duration = cooldown.timer.duration().as_secs_f32();
-            let t = (elapsed / duration).clamp(0.0, 1.0);
-            let scale = 0.8 + t * 0.2;
+            let scale = compute_merge_scale(
+                cooldown.timer.elapsed_secs(),
+                cooldown.timer.duration().as_secs_f32(),
+            );
             transform.scale = Vec3::splat(scale);
         } else {
             if transform.scale != Vec3::ONE {
@@ -567,32 +567,44 @@ pub fn animate_fulfilling_spheres(
         return;
     };
     if let Some(fulfilling_entity) = fulfillment.entity {
-        let elapsed = fulfillment.timer.elapsed_secs();
-        let duration = fulfillment.timer.duration().as_secs_f32();
-        let t = (elapsed / duration).clamp(0.0, 1.0);
-
-        let scale = if t < 0.75 {
-            1.0
-        } else {
-            let t_pop = (t - 0.75) / 0.25; // 0.0 .. 1.0
-            if t_pop < 0.4 {
-                let factor = t_pop / 0.4;
-                1.0 + factor * 0.15
-            } else {
-                let factor = (t_pop - 0.4) / 0.6;
-                1.15 * (1.0 - factor)
-            }
-        };
+        let scale = compute_fulfillment_scale(
+            fulfillment.timer.elapsed_secs(),
+            fulfillment.timer.duration().as_secs_f32(),
+        );
+        let scale_vec = Vec3::splat(scale);
 
         for (child_of, mut transform) in visual_query.iter_mut() {
             if child_of.0 == fulfilling_entity {
-                transform.scale = Vec3::splat(scale);
+                transform.scale = scale_vec;
             }
         }
         for (label, mut transform) in label_query.iter_mut() {
             if label.0 == fulfilling_entity {
-                transform.scale = Vec3::splat(scale);
+                transform.scale = scale_vec;
             }
         }
+    }
+}
+
+pub fn cleanup_launcher_visuals(
+    mut preview_query: Query<&mut Visibility, With<LauncherPreview>>,
+    mut label_query: Query<&mut Visibility, (With<PreviewLabel>, Without<LauncherPreview>)>,
+    mut line_query: Query<
+        &mut Visibility,
+        (
+            With<AimGuideLine>,
+            Without<LauncherPreview>,
+            Without<PreviewLabel>,
+        ),
+    >,
+) {
+    if let Ok(mut vis) = preview_query.single_mut() {
+        crate::utils::set_visibility(&mut vis, Visibility::Hidden);
+    }
+    if let Ok(mut vis) = label_query.single_mut() {
+        crate::utils::set_visibility(&mut vis, Visibility::Hidden);
+    }
+    if let Ok(mut vis) = line_query.single_mut() {
+        crate::utils::set_visibility(&mut vis, Visibility::Hidden);
     }
 }

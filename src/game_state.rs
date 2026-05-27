@@ -17,9 +17,6 @@ pub struct Sphere {
 }
 
 #[derive(Component)]
-pub struct InsideLauncher;
-
-#[derive(Component)]
 pub struct LossTracker {
     pub timer: Timer,
 }
@@ -108,7 +105,7 @@ pub fn check_loss_condition(
     mut next_state: ResMut<NextState<AppState>>,
     mut sphere_query: Query<
         (Entity, &Transform, Option<&mut LossTracker>),
-        (With<Sphere>, Without<InsideLauncher>, Without<Fulfilling>),
+        (With<Sphere>, Without<Fulfilling>),
     >,
 ) {
     for (entity, transform, loss_tracker) in sphere_query.iter_mut() {
@@ -139,46 +136,46 @@ pub fn check_order_fulfillment(
     mut fulfillment: ResMut<ActiveFulfillment>,
     sphere_query: Query<
         (Entity, &Sphere),
-        (
-            Without<InsideLauncher>,
-            Without<crate::physics::MergeCooldown>,
-            Without<Fulfilling>,
-        ),
+        (Without<crate::physics::MergeCooldown>, Without<Fulfilling>),
     >,
+    all_spheres: Query<(), With<Sphere>>,
 ) {
     if let Some(entity) = fulfillment.entity {
         fulfillment.timer.tick(time.delta());
         if fulfillment.timer.is_finished() {
-            // Despawn the sphere fully
-            commands.entity(entity).despawn();
+            // Guard despawn: check if entity still exists before despawning and scoring
+            if all_spheres.get(entity).is_ok() {
+                commands.entity(entity).despawn();
 
-            // Increment score and update peak tier
-            score.total += crate::core_math::get_order_points(active_order.target_tier);
-            if active_order.target_tier > score.peak_tier {
-                score.peak_tier = active_order.target_tier;
+                // Increment score and update peak tier
+                score.total += crate::core_math::get_order_points(active_order.target_tier);
+                if active_order.target_tier > score.peak_tier {
+                    score.peak_tier = active_order.target_tier;
+                }
+
+                score.completed_orders += 1;
+
+                // Assign a new order using a weighted dynamic progression:
+                // - w5 (Tier 5): baseline 5% chance (helper order)
+                // - w8 (Tier 8): starts at 0%, increases by 10% per completed order up to 40% max
+                // - w6 (Tier 6): starts at 60%, decreases by 10% per completed order down to 15% min
+                // - w7 (Tier 7): acts as the remainder to ensure the total weights always sum to exactly 100% (ranges between 35% and 40%)
+                let w8 = (score.completed_orders * 10).min(40);
+                let w6 = 60u32.saturating_sub(score.completed_orders * 10).max(15);
+                let w5 = 5u32;
+                let w7 = 100 - w5 - w6 - w8;
+
+                let roll = rand::random_range(0..100);
+                active_order.target_tier = if roll < w5 {
+                    5
+                } else if roll < w5 + w6 {
+                    6
+                } else if roll < w5 + w6 + w7 {
+                    7
+                } else {
+                    8
+                };
             }
-
-            score.completed_orders += 1;
-
-            // Assign a new order using a weighted dynamic progression:
-            // - w5 (Tier 5): baseline 5% chance (helper order)
-            // - w8 (Tier 8): starts at 0%, increases by 10% per completed order up to 40% max
-            // - w6 (Tier 6): starts at 60%, decreases by 10% per completed order down to 15% min
-            // - w7 (Tier 7): acts as the remainder to ensure the total weights always sum to exactly 100% (ranges between 35% and 40%)
-            let w8 = (score.completed_orders * 10).min(40);
-            let w6 = (60 as u32).saturating_sub(score.completed_orders * 10).max(15);
-            let w5 = 5;
-
-            let roll = rand::random_range(0..100);
-            active_order.target_tier = if roll < w5 {
-                5
-            } else if roll < w5 + w6 {
-                6
-            } else if roll < w5 + w6 + (100 - w5 - w6 - w8) {
-                7
-            } else {
-                8
-            };
 
             // Finish fulfillment
             fulfillment.entity = None;
@@ -204,19 +201,6 @@ pub fn check_order_fulfillment(
     }
 }
 
-fn despawn_recursive_custom(
-    commands: &mut Commands,
-    entity: Entity,
-    children_query: &Query<&Children>,
-) {
-    if let Ok(children) = children_query.get(entity) {
-        for child in children.iter() {
-            despawn_recursive_custom(commands, child, children_query);
-        }
-    }
-    commands.entity(entity).despawn();
-}
-
 pub fn reset_game_state(
     mut commands: Commands,
     mut score: ResMut<Score>,
@@ -224,12 +208,11 @@ pub fn reset_game_state(
     mut queue: ResMut<DispenserQueue>,
     mut fulfillment: ResMut<ActiveFulfillment>,
     sphere_query: Query<Entity, With<Sphere>>,
-    children_query: Query<&Children>,
 ) {
     info!("Resetting game state!");
-    // Despawn all gameplay spheres
+    // Despawn all gameplay spheres recursive
     for entity in sphere_query.iter() {
-        despawn_recursive_custom(&mut commands, entity, &children_query);
+        commands.entity(entity).despawn();
     }
 
     // Reset game resources to initial values
@@ -340,32 +323,6 @@ mod tests {
             .z = 12.0;
 
         // Tick 2: In front -> LossTracker removed
-        app.update();
-        assert!(app.world().entity(entity).get::<LossTracker>().is_none());
-    }
-
-    #[test]
-    fn test_loss_condition_launcher_exclusion() {
-        let mut app = App::new();
-        app.add_plugins(bevy::state::app::StatesPlugin);
-        app.init_state::<AppState>();
-        app.insert_resource(Time::<()>::default());
-        app.insert_resource(GameSettings {
-            launcher_z: 12.0,
-            ..default()
-        });
-        app.add_systems(Update, check_loss_condition);
-
-        let entity = app
-            .world_mut()
-            .spawn((
-                Sphere { tier: 1 },
-                InsideLauncher,
-                Transform::from_xyz(0.0, 0.0, 12.5),
-            ))
-            .id();
-
-        // Update -> Should NOT add LossTracker because InsideLauncher is present
         app.update();
         assert!(app.world().entity(entity).get::<LossTracker>().is_none());
     }

@@ -1,4 +1,4 @@
-use crate::game_state::{GameSettings, InsideLauncher, Sphere};
+use crate::game_state::{GameSettings, Sphere};
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
@@ -35,15 +35,13 @@ impl Plugin for LauncherPlugin {
         app.init_resource::<LauncherState>().add_systems(
             Update,
             (
-                (
-                    update_launcher_aiming,
-                    check_launcher_obstructions,
-                    handle_launch_input,
-                )
-                    .chain()
-                    .run_if(in_state(crate::game_state::AppState::InGame)),
+                update_launcher_aiming,
+                check_launcher_obstructions,
+                handle_launch_input,
                 update_launcher_preview_visuals,
-            ),
+            )
+                .chain()
+                .run_if(in_state(crate::game_state::AppState::InGame)),
         );
     }
 }
@@ -60,10 +58,7 @@ pub fn update_launcher_aiming(
     dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
     sphere_query: Query<
         (&Transform, &Sphere, Option<&Velocity>),
-        (
-            Without<InsideLauncher>,
-            Without<crate::game_state::Fulfilling>,
-        ),
+        Without<crate::game_state::Fulfilling>,
     >,
     mut launcher_state: ResMut<LauncherState>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -282,20 +277,11 @@ pub fn update_launcher_preview_visuals(
     launcher_state: Res<LauncherState>,
     settings: Res<GameSettings>,
     dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
-    state: Option<Res<State<crate::game_state::AppState>>>,
     mut preview_query: Query<(&mut Transform, &mut Visibility), With<LauncherPreview>>,
 ) {
     let Ok((mut transform, mut visibility)) = preview_query.single_mut() else {
         return;
     };
-
-    let is_in_game = state.map(|s| *s.get() == crate::game_state::AppState::InGame).unwrap_or(false);
-    if !is_in_game {
-        if *visibility != Visibility::Hidden {
-            *visibility = Visibility::Hidden;
-        }
-        return;
-    }
 
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
     let radius = crate::core_math::get_radius(current_tier);
@@ -306,13 +292,9 @@ pub fn update_launcher_preview_visuals(
     // Hide preview sphere during the first part of the cooldown for a smoother spawning feel
     let elapsed = launcher_state.cooldown_timer.elapsed_secs();
     if !launcher_state.cooldown_timer.is_finished() && elapsed < 0.4 {
-        if *visibility != Visibility::Hidden {
-            *visibility = Visibility::Hidden;
-        }
+        crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
     } else {
-        if *visibility != Visibility::Visible {
-            *visibility = Visibility::Visible;
-        }
+        crate::utils::set_visibility(&mut visibility, Visibility::Visible);
     }
 }
 
@@ -427,7 +409,10 @@ mod tests {
         let mut found = false;
         for (_entity, sphere, transform, velocity) in query.iter(app.world()) {
             if sphere.tier == 3 {
-                assert_eq!(transform.translation, Vec3::new(2.0, crate::core_math::get_radius(3), 12.0));
+                assert_eq!(
+                    transform.translation,
+                    Vec3::new(2.0, crate::core_math::get_radius(3), 12.0)
+                );
                 assert_eq!(velocity.linear, Vec3::new(0.0, 0.0, -15.0));
                 found = true;
             }
@@ -484,6 +469,45 @@ mod tests {
                 .resource::<crate::game_state::DispenserQueue>()
                 .current,
             2
+        );
+    }
+
+    #[test]
+    fn test_merge_cooldown_blocking() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(GameSettings::default());
+        app.insert_resource(LauncherState {
+            active_x: 0.0,
+            ..default()
+        });
+        app.insert_resource(crate::game_state::DispenserQueue {
+            current: 1,
+            next: 2,
+        });
+        app.insert_resource(ButtonInput::<MouseButton>::default());
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(Time::<()>::default());
+        app.add_systems(Update, handle_launch_input);
+
+        // Spawn a dummy entity with MergeCooldown to simulate active merge animation
+        app.world_mut().spawn(crate::physics::MergeCooldown {
+            timer: Timer::from_seconds(0.5, TimerMode::Once),
+        });
+
+        // Try to fire
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.update();
+        app.update();
+
+        // The launch should be blocked, queue.current remains 1
+        assert_eq!(
+            app.world()
+                .resource::<crate::game_state::DispenserQueue>()
+                .current,
+            1
         );
     }
 }

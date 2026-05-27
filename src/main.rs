@@ -3,6 +3,7 @@ mod game_state;
 mod hud;
 mod launcher;
 mod physics;
+mod utils;
 mod visuals;
 
 use bevy::prelude::*;

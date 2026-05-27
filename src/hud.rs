@@ -79,18 +79,11 @@ impl Plugin for HudPlugin {
                 OnExit(crate::game_state::AppState::GameOver),
                 despawn_game_over_screen,
             )
-            .add_systems(
-                OnEnter(crate::game_state::AppState::Win),
-                spawn_win_screen,
-            )
-            .add_systems(
-                OnExit(crate::game_state::AppState::Win),
-                despawn_win_screen,
-            )
+            .add_systems(OnEnter(crate::game_state::AppState::Win), spawn_win_screen)
+            .add_systems(OnExit(crate::game_state::AppState::Win), despawn_win_screen)
             .add_systems(
                 Update,
-                (handle_restart_input, handle_restart_button)
-                    .run_if(in_game_over_or_win_state),
+                (handle_restart_input, handle_restart_button).run_if(in_game_over_or_win_state),
             );
     }
 }
@@ -338,7 +331,7 @@ fn update_next_sphere_hud(
     let Some(queue) = queue else {
         return;
     };
-    let idx = (queue.next as usize).saturating_sub(1).min(9);
+    let idx = (queue.next as usize).saturating_sub(1).min(8);
 
     let color = TIER_COLORS[idx];
 
@@ -464,26 +457,9 @@ fn spawn_game_over_screen(mut commands: Commands, score: Res<Score>) {
         });
 }
 
-fn despawn_recursive_custom(
-    commands: &mut Commands,
-    entity: Entity,
-    children_query: &Query<&Children>,
-) {
-    if let Ok(children) = children_query.get(entity) {
-        for child in children.iter() {
-            despawn_recursive_custom(commands, child, children_query);
-        }
-    }
-    commands.entity(entity).despawn();
-}
-
-fn despawn_game_over_screen(
-    mut commands: Commands,
-    query: Query<Entity, With<GameOverScreen>>,
-    children_query: Query<&Children>,
-) {
+fn despawn_game_over_screen(mut commands: Commands, query: Query<Entity, With<GameOverScreen>>) {
     for entity in query.iter() {
-        despawn_recursive_custom(&mut commands, entity, &children_query);
+        commands.entity(entity).despawn();
     }
 }
 
@@ -522,26 +498,21 @@ fn handle_restart_button(
 }
 
 fn in_game_over_or_win_state(state: Res<State<crate::game_state::AppState>>) -> bool {
-    matches!(*state.get(), crate::game_state::AppState::GameOver | crate::game_state::AppState::Win)
+    matches!(
+        *state.get(),
+        crate::game_state::AppState::GameOver | crate::game_state::AppState::Win
+    )
 }
 
-fn despawn_main_menu_screen(
-    mut commands: Commands,
-    query: Query<Entity, With<MainMenuScreen>>,
-    children_query: Query<&Children>,
-) {
+fn despawn_main_menu_screen(mut commands: Commands, query: Query<Entity, With<MainMenuScreen>>) {
     for entity in query.iter() {
-        despawn_recursive_custom(&mut commands, entity, &children_query);
+        commands.entity(entity).despawn();
     }
 }
 
-fn despawn_win_screen(
-    mut commands: Commands,
-    query: Query<Entity, With<WinScreen>>,
-    children_query: Query<&Children>,
-) {
+fn despawn_win_screen(mut commands: Commands, query: Query<Entity, With<WinScreen>>) {
     for entity in query.iter() {
-        despawn_recursive_custom(&mut commands, entity, &children_query);
+        commands.entity(entity).despawn();
     }
 }
 
@@ -751,5 +722,71 @@ fn update_aim_guide_button_text(
         if let Ok(mut text) = query.single_mut() {
             text.0 = format!("Aim Line: {}", if aim_line_mode.0 { "ON" } else { "OFF" });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game_state::AppState;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn test_in_game_over_or_win_state() {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
+
+        // Under MainMenu, should be false
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::MainMenu
+        );
+        assert!(!app
+            .world_mut()
+            .run_system_once(in_game_over_or_win_state)
+            .unwrap());
+
+        // Under InGame, should be false
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::InGame
+        );
+        assert!(!app
+            .world_mut()
+            .run_system_once(in_game_over_or_win_state)
+            .unwrap());
+
+        // Under GameOver, should be true
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::GameOver);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::GameOver
+        );
+        assert!(app
+            .world_mut()
+            .run_system_once(in_game_over_or_win_state)
+            .unwrap());
+
+        // Under Win, should be true
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Win);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::Win
+        );
+        assert!(app
+            .world_mut()
+            .run_system_once(in_game_over_or_win_state)
+            .unwrap());
     }
 }

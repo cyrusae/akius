@@ -81,7 +81,6 @@ pub fn spawn_sphere_entity<'a>(
             | LockedAxes::ROTATION_LOCKED_X
             | LockedAxes::ROTATION_LOCKED_Y
             | LockedAxes::ROTATION_LOCKED_Z,
-        Visibility::default(),
     ));
     cmd
 }
@@ -92,8 +91,8 @@ pub fn detect_collisions(
     sphere_query: Query<
         &Sphere,
         (
-            Without<crate::game_state::InsideLauncher>,
             Without<MergeCooldown>,
+            Without<crate::game_state::Fulfilling>,
         ),
     >,
     mut merge_events: MessageWriter<MergeEvent>,
@@ -119,7 +118,6 @@ pub fn check_distance_merges(
     sphere_query: Query<
         (Entity, &Sphere, &Transform),
         (
-            Without<crate::game_state::InsideLauncher>,
             Without<MergeCooldown>,
             Without<crate::game_state::Fulfilling>,
         ),
@@ -162,7 +160,7 @@ pub fn resolve_merges(
     mut merge_events: MessageReader<MergeEvent>,
     mut score: ResMut<Score>,
     sphere_query: Query<(&Sphere, &Transform, &Velocity)>,
-    mut next_state: Option<ResMut<NextState<crate::game_state::AppState>>>,
+    mut next_state: ResMut<NextState<crate::game_state::AppState>>,
 ) {
     let mut merged_this_frame = HashSet::new();
     for event in merge_events.read() {
@@ -222,9 +220,7 @@ pub fn resolve_merges(
                 // Secret win condition triggered: merging two Tier 8s to form Tier 9
                 if next_tier == 9 {
                     info!("Secret Win Condition reached! Transitioning to AppState::Win");
-                    if let Some(ref mut ns) = next_state {
-                        ns.set(crate::game_state::AppState::Win);
-                    }
+                    next_state.set(crate::game_state::AppState::Win);
                 }
             }
         }
@@ -290,6 +286,7 @@ pub fn unlock_all_spheres_on_game_over(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_state::AppState;
     use bevy_rapier3d::rapier::geometry::CollisionEventFlags;
 
     #[test]
@@ -351,6 +348,8 @@ mod tests {
     fn test_collision_midpoint_merge() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
         app.add_message::<CollisionEvent>();
         app.add_plugins(PhysicsPlugin);
         app.insert_resource(Score {
@@ -401,7 +400,10 @@ mod tests {
 
         for (_ent, sphere, transform, velocity) in query.iter(app.world()) {
             if sphere.tier == 2 {
-                assert_eq!(transform.translation, Vec3::new(1.0, crate::core_math::get_radius(2), 0.0)); // Midpoint of (0,0,0) and (2,0,0)
+                assert_eq!(
+                    transform.translation,
+                    Vec3::new(1.0, crate::core_math::get_radius(2), 0.0)
+                ); // Midpoint of (0,0,0) and (2,0,0)
                 assert_eq!(velocity.linear, Vec3::new(0.0, 0.0, 0.0)); // 50% of (10 - 10)
                 found = true;
             }
@@ -418,6 +420,8 @@ mod tests {
     fn test_double_merge_safety() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
         app.add_message::<CollisionEvent>();
         app.add_plugins(PhysicsPlugin);
         app.insert_resource(Score {
@@ -481,6 +485,8 @@ mod tests {
     fn test_merge_momentum_conservation() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
         app.add_message::<CollisionEvent>();
         app.add_plugins(PhysicsPlugin);
         app.insert_resource(Score {
@@ -528,5 +534,54 @@ mod tests {
             }
         }
         assert!(checked);
+    }
+
+    #[test]
+    fn test_spill_spheres() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(crate::game_state::GameSettings {
+            launcher_z: 12.0,
+            ..default()
+        });
+        app.add_systems(Update, spill_spheres);
+
+        // Spawn a sphere with Z < 12 (launcher_z), translation.z = 10.0
+        let entity_inside = app
+            .world_mut()
+            .spawn((
+                Sphere { tier: 1 },
+                Transform::from_xyz(0.0, 0.0, 10.0),
+                LockedAxes::TRANSLATION_LOCKED_Y,
+            ))
+            .id();
+
+        // Spawn a sphere with Z > 12, translation.z = 13.0
+        let entity_spilled = app
+            .world_mut()
+            .spawn((
+                Sphere { tier: 1 },
+                Transform::from_xyz(0.0, 0.0, 13.0),
+                LockedAxes::TRANSLATION_LOCKED_Y,
+            ))
+            .id();
+
+        app.update();
+
+        // Verify entity_inside still has its axes locked
+        let axes_inside = app
+            .world()
+            .entity(entity_inside)
+            .get::<LockedAxes>()
+            .unwrap();
+        assert_eq!(*axes_inside, LockedAxes::TRANSLATION_LOCKED_Y);
+
+        // Verify entity_spilled has LockedAxes::empty()
+        let axes_spilled = app
+            .world()
+            .entity(entity_spilled)
+            .get::<LockedAxes>()
+            .unwrap();
+        assert_eq!(*axes_spilled, LockedAxes::empty());
     }
 }

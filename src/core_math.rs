@@ -73,7 +73,7 @@ mod tests {
         for _ in 0..iterations {
             let tier = get_random_dispensed_tier(&mut rng);
             assert!(
-                tier >= 1 && tier <= 5,
+                tier >= 1 && tier <= 4,
                 "Dispensed tier out of bounds: {}",
                 tier
             );
