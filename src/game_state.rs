@@ -138,14 +138,21 @@ pub fn check_order_fulfillment(
         (Entity, &Sphere),
         (Without<crate::physics::MergeCooldown>, Without<Fulfilling>),
     >,
-    all_spheres: Query<(), With<Sphere>>,
+    all_spheres: Query<&Transform, With<Sphere>>,
+    mut fulfillment_burst_events: MessageWriter<FulfillmentBurstEvent>,
 ) {
     if let Some(entity) = fulfillment.entity {
         fulfillment.timer.tick(time.delta());
         if fulfillment.timer.is_finished() {
             // Guard despawn: check if entity still exists before despawning and scoring
-            if all_spheres.get(entity).is_ok() {
+            if let Ok(sphere_transform) = all_spheres.get(entity) {
+                let position = sphere_transform.translation;
                 commands.entity(entity).despawn();
+
+                fulfillment_burst_events.write(FulfillmentBurstEvent {
+                    position,
+                    tier: active_order.target_tier,
+                });
 
                 // Increment score and update peak tier
                 score.total += crate::core_math::get_order_points(active_order.target_tier);
@@ -226,6 +233,59 @@ pub fn reset_game_state(
     queue.next = 2;
 
     *fulfillment = ActiveFulfillment::default();
+}
+
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HighScore(pub u32);
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct MergeBurstEvent {
+    pub position: Vec3,
+    pub tier: u8,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct FulfillmentBurstEvent {
+    pub position: Vec3,
+    pub tier: u8,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn save_high_score_to_local_storage(val: u32) {
+    if let Some(window) = web_sys::window() {
+        if let Ok(Some(storage)) = window.local_storage() {
+            let _ = storage.set_item("akius_high_score", &val.to_string());
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn save_high_score_to_local_storage(_val: u32) {}
+
+#[cfg(target_arch = "wasm32")]
+pub fn load_high_score_from_local_storage() -> u32 {
+    if let Some(window) = web_sys::window() {
+        if let Ok(Some(storage)) = window.local_storage() {
+            if let Ok(Some(val_str)) = storage.get_item("akius_high_score") {
+                if let Ok(val) = val_str.parse::<u32>() {
+                    return val;
+                }
+            }
+        }
+    }
+    0
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_high_score_from_local_storage() -> u32 {
+    0
+}
+
+pub fn update_high_score(score: Res<Score>, mut high_score: ResMut<HighScore>) {
+    if score.total > high_score.0 {
+        high_score.0 = score.total;
+        save_high_score_to_local_storage(high_score.0);
+    }
 }
 
 #[cfg(test)]
@@ -330,6 +390,7 @@ mod tests {
     #[test]
     fn test_order_fulfillment() {
         let mut app = App::new();
+        app.add_message::<FulfillmentBurstEvent>();
         app.insert_resource(Time::<()>::default());
         app.insert_resource(Score {
             total: 0,
@@ -341,7 +402,10 @@ mod tests {
         app.add_systems(Update, check_order_fulfillment);
 
         // Spawn matching sphere
-        let sphere_entity = app.world_mut().spawn(Sphere { tier: 4 }).id();
+        let sphere_entity = app
+            .world_mut()
+            .spawn((Sphere { tier: 4 }, Transform::default()))
+            .id();
 
         // Run frame 1: Should detect matching sphere and start fulfillment
         app.update();

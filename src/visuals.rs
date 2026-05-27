@@ -93,6 +93,7 @@ impl Plugin for VisualPlugin {
                     animate_merged_spawns,
                     animate_fulfilling_spheres,
                     cleanup_orphaned_labels,
+                    handle_placeholder_bursts,
                 ),
             )
             .add_systems(
@@ -606,5 +607,23 @@ pub fn cleanup_launcher_visuals(
     }
     if let Ok(mut vis) = line_query.single_mut() {
         crate::utils::set_visibility(&mut vis, Visibility::Hidden);
+    }
+}
+
+pub fn handle_placeholder_bursts(
+    mut merge_events: MessageReader<crate::game_state::MergeBurstEvent>,
+    mut fulfill_events: MessageReader<crate::game_state::FulfillmentBurstEvent>,
+) {
+    for event in merge_events.read() {
+        info!(
+            "PLACEHOLDER: Spawning merge visual burst at {:?} for tier {}",
+            event.position, event.tier
+        );
+    }
+    for event in fulfill_events.read() {
+        info!(
+            "PLACEHOLDER: Spawning fulfillment visual burst at {:?} for tier {}",
+            event.position, event.tier
+        );
     }
 }

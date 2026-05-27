@@ -36,6 +36,10 @@ fn main() {
             next: 2,
         })
         .insert_resource(game_state::ActiveFulfillment::default())
+        .insert_resource(game_state::HighScore(
+            game_state::load_high_score_from_local_storage(),
+        ))
+        .add_message::<game_state::FulfillmentBurstEvent>()
         .add_systems(Startup, setup_camera_and_light)
         .add_systems(
             OnEnter(game_state::AppState::InGame),
@@ -49,6 +53,7 @@ fn main() {
             )
                 .run_if(in_state(game_state::AppState::InGame)),
         )
+        .add_systems(Update, game_state::update_high_score)
         .run();
 }
 

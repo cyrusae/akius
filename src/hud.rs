@@ -294,14 +294,19 @@ fn setup_hud(mut commands: Commands) {
         });
 }
 
-fn update_score_hud(score: Option<Res<Score>>, mut query: Query<&mut Text, With<ScoreText>>) {
+fn update_score_hud(
+    score: Option<Res<Score>>,
+    high_score: Option<Res<crate::game_state::HighScore>>,
+    mut query: Query<&mut Text, With<ScoreText>>,
+) {
     let Some(score) = score else {
         return;
     };
     let Ok(mut text) = query.single_mut() else {
         return;
     };
-    let new_text = format!("Score: {}", score.total);
+    let hi = high_score.map(|h| h.0).unwrap_or(0);
+    let new_text = format!("Score: {}  HI: {}", score.total, hi);
     if text.0 != new_text {
         text.0 = new_text;
     }

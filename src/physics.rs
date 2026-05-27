@@ -24,6 +24,7 @@ pub struct PhysicsPlugin;
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MergeEvent>()
+            .add_message::<crate::game_state::MergeBurstEvent>()
             .add_systems(
                 Update,
                 (
@@ -161,6 +162,7 @@ pub fn resolve_merges(
     mut score: ResMut<Score>,
     sphere_query: Query<(&Sphere, &Transform, &Velocity)>,
     mut next_state: ResMut<NextState<crate::game_state::AppState>>,
+    mut merge_burst_events: MessageWriter<crate::game_state::MergeBurstEvent>,
 ) {
     let mut merged_this_frame = HashSet::new();
     for event in merge_events.read() {
@@ -209,6 +211,11 @@ pub fn resolve_merges(
                     spawn_sphere_entity(&mut commands, next_tier, midpoint, merged_velocity);
                 cmd.insert(MergeCooldown {
                     timer: Timer::from_seconds(0.35, TimerMode::Once),
+                });
+
+                merge_burst_events.write(crate::game_state::MergeBurstEvent {
+                    position: midpoint,
+                    tier: next_tier,
                 });
 
                 // Add points and record peak tier
