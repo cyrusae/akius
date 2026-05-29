@@ -39,6 +39,13 @@ pub struct MainMenuScreen;
 pub struct StartButton;
 
 #[derive(Component)]
+pub struct EffectsButton;
+
+#[derive(Component)]
+pub struct EffectsButtonText;
+
+
+#[derive(Component)]
 pub struct WinScreen;
 
 pub struct HudPlugin;
@@ -56,6 +63,8 @@ impl Plugin for HudPlugin {
                     update_colorblind_button_text,
                     handle_aim_guide_button,
                     update_aim_guide_button_text,
+                    handle_effects_button,
+                    update_effects_button_text,
                 ),
             )
             .add_systems(
@@ -88,7 +97,9 @@ impl Plugin for HudPlugin {
     }
 }
 
-fn setup_hud(mut commands: Commands) {
+fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let font_handle = asset_server.load("fonts/ShareTechMono-Regular.ttf");
+
     // Main full screen container
     commands
         .spawn(Node {
@@ -130,8 +141,9 @@ fn setup_hud(mut commands: Commands) {
                         .with_children(|score_panel| {
                             score_panel.spawn((
                                 ScoreText,
-                                Text::new("Score: 0"),
+                                Text::new("MEM: 0x000000"),
                                 TextFont {
+                                    font: font_handle.clone(),
                                     font_size: 24.0,
                                     ..default()
                                 },
@@ -158,8 +170,9 @@ fn setup_hud(mut commands: Commands) {
                         .with_children(|order_panel| {
                             order_panel.spawn((
                                 OrderText,
-                                Text::new("Target: Tier 6"),
+                                Text::new("[ TRG: TIER 06 ]"),
                                 TextFont {
+                                    font: font_handle.clone(),
                                     font_size: 24.0,
                                     ..default()
                                 },
@@ -190,6 +203,7 @@ fn setup_hud(mut commands: Commands) {
                             next_panel.spawn((
                                 Text::new("Next:"),
                                 TextFont {
+                                    font: font_handle.clone(),
                                     font_size: 20.0,
                                     ..default()
                                 },
@@ -215,6 +229,7 @@ fn setup_hud(mut commands: Commands) {
                                         NextSpherePreviewText,
                                         Text::new(""),
                                         TextFont {
+                                            font: font_handle.clone(),
                                             font_size: 16.0,
                                             ..default()
                                         },
@@ -256,6 +271,36 @@ fn setup_hud(mut commands: Commands) {
                                 AimGuideButtonText,
                                 Text::new("Aim Line: ON"),
                                 TextFont {
+                                    font: font_handle.clone(),
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+
+                    // Visual Effects (FX) button
+                    bottom_row
+                        .spawn((
+                            EffectsButton,
+                            Button,
+                            Node {
+                                width: Val::Px(160.0),
+                                height: Val::Px(45.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BorderColor::all(Color::WHITE),
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                EffectsButtonText,
+                                Text::new("FX: ON"),
+                                TextFont {
+                                    font: font_handle.clone(),
                                     font_size: 16.0,
                                     ..default()
                                 },
@@ -284,6 +329,7 @@ fn setup_hud(mut commands: Commands) {
                                 ColorblindButtonText,
                                 Text::new("Numbers: ON"),
                                 TextFont {
+                                    font: font_handle.clone(),
                                     font_size: 16.0,
                                     ..default()
                                 },
@@ -306,7 +352,7 @@ fn update_score_hud(
         return;
     };
     let hi = high_score.map(|h| h.0).unwrap_or(0);
-    let new_text = format!("Score: {}  HI: {}", score.total, hi);
+    let new_text = format!("MEM: 0x{:06X}  HI: 0x{:06X}", score.total, hi);
     if text.0 != new_text {
         text.0 = new_text;
     }
@@ -322,9 +368,49 @@ fn update_order_hud(
     let Ok(mut text) = query.single_mut() else {
         return;
     };
-    let new_text = format!("Target: Tier {}", active_order.target_tier);
+    let new_text = format!("[ TRG: TIER {:02} ]", active_order.target_tier);
     if text.0 != new_text {
         text.0 = new_text;
+    }
+}
+
+fn handle_effects_button(
+    mut interaction_query: Query<
+        &Interaction,
+        (Changed<Interaction>, With<EffectsButton>),
+    >,
+    mut effects_mode: ResMut<crate::game_state::VisualEffectsMode>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+) {
+    let mut toggle = false;
+    for interaction in &mut interaction_query {
+        if *interaction == Interaction::Pressed {
+            toggle = true;
+        }
+    }
+    if keyboard.just_pressed(KeyCode::KeyF) {
+        toggle = true;
+    }
+    if toggle {
+        *effects_mode = match *effects_mode {
+            crate::game_state::VisualEffectsMode::On => crate::game_state::VisualEffectsMode::Off,
+            crate::game_state::VisualEffectsMode::Off => crate::game_state::VisualEffectsMode::On,
+        };
+        info!("Visual effects toggled to: {:?}", *effects_mode);
+    }
+}
+
+fn update_effects_button_text(
+    effects_mode: Res<crate::game_state::VisualEffectsMode>,
+    mut query: Query<&mut Text, With<EffectsButtonText>>,
+) {
+    if effects_mode.is_changed() {
+        for mut text in &mut query {
+            text.0 = match *effects_mode {
+                crate::game_state::VisualEffectsMode::On => "FX: ON".to_string(),
+                crate::game_state::VisualEffectsMode::Off => "FX: OFF".to_string(),
+            };
+        }
     }
 }
 
@@ -387,7 +473,12 @@ fn update_colorblind_button_text(
     }
 }
 
-fn spawn_game_over_screen(mut commands: Commands, score: Res<Score>) {
+fn spawn_game_over_screen(
+    mut commands: Commands,
+    score: Res<Score>,
+    asset_server: Res<AssetServer>,
+) {
+    let font_handle = asset_server.load("fonts/ShareTechMono-Regular.ttf");
     commands
         .spawn((
             GameOverScreen,
@@ -408,6 +499,7 @@ fn spawn_game_over_screen(mut commands: Commands, score: Res<Score>) {
             parent.spawn((
                 Text::new("FATAL: board.overflow"),
                 TextFont {
+                    font: font_handle.clone(),
                     font_size: 40.0,
                     ..default()
                 },
@@ -415,8 +507,9 @@ fn spawn_game_over_screen(mut commands: Commands, score: Res<Score>) {
             ));
 
             parent.spawn((
-                Text::new(format!("final.score = {:06}", score.total)),
+                Text::new(format!("final.score = 0x{:06X}", score.total)),
                 TextFont {
+                    font: font_handle.clone(),
                     font_size: 32.0,
                     ..default()
                 },
@@ -426,6 +519,7 @@ fn spawn_game_over_screen(mut commands: Commands, score: Res<Score>) {
             parent.spawn((
                 Text::new("[ press space to restart ]"),
                 TextFont {
+                    font: font_handle.clone(),
                     font_size: 20.0,
                     ..default()
                 },
@@ -453,6 +547,7 @@ fn spawn_game_over_screen(mut commands: Commands, score: Res<Score>) {
                     btn.spawn((
                         Text::new("RESTART"),
                         TextFont {
+                            font: font_handle.clone(),
                             font_size: 18.0,
                             ..default()
                         },
@@ -555,7 +650,8 @@ fn handle_start_button(
     }
 }
 
-fn spawn_main_menu_screen(mut commands: Commands) {
+fn spawn_main_menu_screen(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let font_handle = asset_server.load("fonts/ShareTechMono-Regular.ttf");
     commands
         .spawn((
             MainMenuScreen,
@@ -576,6 +672,7 @@ fn spawn_main_menu_screen(mut commands: Commands) {
             parent.spawn((
                 Text::new("akiuS"),
                 TextFont {
+                    font: font_handle.clone(),
                     font_size: 56.0,
                     ..default()
                 },
@@ -585,6 +682,7 @@ fn spawn_main_menu_screen(mut commands: Commands) {
             parent.spawn((
                 Text::new("[ press space to start ]"),
                 TextFont {
+                    font: font_handle.clone(),
                     font_size: 22.0,
                     ..default()
                 },
@@ -612,6 +710,7 @@ fn spawn_main_menu_screen(mut commands: Commands) {
                     btn.spawn((
                         Text::new("START"),
                         TextFont {
+                            font: font_handle.clone(),
                             font_size: 18.0,
                             ..default()
                         },
@@ -621,7 +720,8 @@ fn spawn_main_menu_screen(mut commands: Commands) {
         });
 }
 
-fn spawn_win_screen(mut commands: Commands, score: Res<Score>) {
+fn spawn_win_screen(mut commands: Commands, score: Res<Score>, asset_server: Res<AssetServer>) {
+    let font_handle = asset_server.load("fonts/ShareTechMono-Regular.ttf");
     commands
         .spawn((
             WinScreen,
@@ -642,6 +742,7 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>) {
             parent.spawn((
                 Text::new("SYSTEM OK: cosmic.collapse"),
                 TextFont {
+                    font: font_handle.clone(),
                     font_size: 40.0,
                     ..default()
                 },
@@ -649,8 +750,9 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>) {
             ));
 
             parent.spawn((
-                Text::new(format!("final.score = {:06}", score.total)),
+                Text::new(format!("final.score = 0x{:06X}", score.total)),
                 TextFont {
+                    font: font_handle.clone(),
                     font_size: 32.0,
                     ..default()
                 },
@@ -660,6 +762,7 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>) {
             parent.spawn((
                 Text::new("[ press space to play again ]"),
                 TextFont {
+                    font: font_handle.clone(),
                     font_size: 20.0,
                     ..default()
                 },
@@ -687,6 +790,7 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>) {
                     btn.spawn((
                         Text::new("RESTART"),
                         TextFont {
+                            font: font_handle.clone(),
                             font_size: 18.0,
                             ..default()
                         },

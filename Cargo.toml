@@ -16,3 +16,13 @@ web-sys = { version = "0.3", features = ["Window", "Storage"] }
 opt-level = 'z'
 lto = true
 codegen-units = 1
+
+# Enable a small amount of optimization in debug mode for the game code
+[profile.dev]
+opt-level = 1
+debug = false
+strip = true
+
+# Enable high optimizations for dependencies (including Bevy, rapier, etc.) in debug mode
+[profile.dev.package."*"]
+opt-level = 3

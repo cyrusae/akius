@@ -5,6 +5,7 @@ dist = "dist"
 [serve]
 port = 8080
 addresses = ["127.0.0.1"]
+no_spa = true
 
 [tools]
 wasm-opt = "version_116"

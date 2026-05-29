@@ -2,11 +2,12 @@ use crate::core_math::get_radius;
 use crate::game_state::{AimLineMode, ColorblindMode, DispenserQueue, GameSettings, Sphere};
 use crate::launcher::{LauncherPreview, LauncherState};
 use bevy::prelude::*;
+use bevy::render::render_resource::{AsBindGroup, ShaderType};
+use bevy::shader::ShaderRef;
 use bevy_rapier3d::prelude::Collider;
 
 // ---------------------------------------------------------------------------
-// Tier color palette — warm perceptual gradient, violet → sky blue → lime →
-// orange → gold, designed to be distinct across 10 steps.
+// Tier color palette — vibrant rainbow gradient, designed to be distinct.
 // ---------------------------------------------------------------------------
 pub const TIER_COLORS: [Color; 9] = [
     Color::hsl(270.0, 0.70, 0.55), // Tier  1 — violet
@@ -28,6 +29,21 @@ pub const TIER_COLORS: [Color; 9] = [
 #[derive(Component)]
 pub struct SphereVisual;
 
+/// Tag on the nested emissive core entity.
+#[derive(Component)]
+pub struct SphereCore;
+
+/// Tag on the preview core entity.
+#[derive(Component)]
+pub struct PreviewCore;
+
+/// Tag on falling Matrix particles.
+#[derive(Component)]
+pub struct MatrixParticle {
+    pub velocity: Vec3,
+    pub lifetime: Timer,
+}
+
 /// Tag on a root-level Text2d label entity. Stores the sphere entity it follows.
 #[derive(Component)]
 pub struct BillboardLabel(pub Entity);
@@ -41,32 +57,73 @@ pub struct PreviewLabel;
 pub struct AimGuideLine;
 
 // ---------------------------------------------------------------------------
-// Resources
+// Resources & Custom Materials
 // ---------------------------------------------------------------------------
+
+pub const SPHERE_GRID_SHADER_HANDLE: Handle<Shader> = bevy::asset::uuid_handle!("28394710-9283-7498-1273-918231273491");
+pub const FLOOR_GRID_SHADER_HANDLE: Handle<Shader> = bevy::asset::uuid_handle!("17283947-1928-3749-1827-394817293847");
+
+#[derive(ShaderType, Clone, Copy, Debug)]
+pub struct SphereUniforms {
+    pub color: LinearRgba,
+    pub base_color: LinearRgba,
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct SphereMaterial {
+    #[uniform(0)]
+    pub uniforms: SphereUniforms,
+}
+
+impl Material for SphereMaterial {
+    fn fragment_shader() -> ShaderRef {
+        ShaderRef::Handle(SPHERE_GRID_SHADER_HANDLE)
+    }
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct FloorMaterial {
+    #[uniform(0)]
+    pub grid_color: LinearRgba,
+    #[uniform(0)]
+    pub bg_color: LinearRgba,
+}
+
+impl Material for FloorMaterial {
+    fn fragment_shader() -> ShaderRef {
+        ShaderRef::Handle(FLOOR_GRID_SHADER_HANDLE)
+    }
+}
+
+#[derive(Resource)]
+pub struct RetroEffectsAsset {
+    pub font: Handle<Font>,
+}
 
 /// Pre-built material handles for each tier.
 #[derive(Resource)]
 pub struct TierMaterials {
-    pub normal: [Handle<StandardMaterial>; 9],
+    pub normal: [Handle<SphereMaterial>; 9],
 }
 
 /// Build all 9 tier materials.
-fn build_tier_materials(materials: &mut Assets<StandardMaterial>) -> TierMaterials {
+fn build_tier_materials(materials: &mut Assets<SphereMaterial>) -> TierMaterials {
     let normal = std::array::from_fn(|i| {
         let color = TIER_COLORS[i];
-        materials.add(StandardMaterial {
-            base_color: color,
-            emissive: LinearRgba::from(color) * 0.15,
-            perceptual_roughness: 0.4,
-            metallic: 0.1,
-            ..default()
+        let base_color = LinearRgba::from(color) * 0.05;
+        let line_color = LinearRgba::from(color) * 1.5;
+        materials.add(SphereMaterial {
+            uniforms: SphereUniforms {
+                color: line_color,
+                base_color,
+            },
         })
     });
     TierMaterials { normal }
 }
 
 /// Return the correct material handle for a tier (1-indexed).
-pub fn material_for_tier(tier: u8, tier_mats: &TierMaterials) -> Handle<StandardMaterial> {
+pub fn material_for_tier(tier: u8, tier_mats: &TierMaterials) -> Handle<SphereMaterial> {
     let idx = (tier as usize).saturating_sub(1).min(8);
     tier_mats.normal[idx].clone()
 }
@@ -75,11 +132,31 @@ pub fn material_for_tier(tier: u8, tier_mats: &TierMaterials) -> Handle<Standard
 // Plugin
 // ---------------------------------------------------------------------------
 
+fn setup_visuals_shaders(mut shaders: ResMut<Assets<Shader>>) {
+    let _ = shaders.insert(
+        &SPHERE_GRID_SHADER_HANDLE,
+        Shader::from_wgsl(
+            include_str!("../assets/shaders/sphere_grid.wgsl"),
+            "shaders/sphere_grid.wgsl",
+        ),
+    );
+    let _ = shaders.insert(
+        &FLOOR_GRID_SHADER_HANDLE,
+        Shader::from_wgsl(
+            include_str!("../assets/shaders/floor_grid.wgsl"),
+            "shaders/floor_grid.wgsl",
+        ),
+    );
+}
+
 pub struct VisualPlugin;
 
 impl Plugin for VisualPlugin {
     fn build(&self, app: &mut App) {
         app
+            .add_plugins(MaterialPlugin::<SphereMaterial>::default())
+            .add_plugins(MaterialPlugin::<FloorMaterial>::default())
+            .add_systems(PreStartup, setup_visuals_shaders)
             // Systems
             .add_systems(Startup, setup_visuals)
             .add_systems(
@@ -94,6 +171,8 @@ impl Plugin for VisualPlugin {
                     animate_fulfilling_spheres,
                     cleanup_orphaned_labels,
                     handle_placeholder_bursts,
+                    update_matrix_particles,
+                    update_sphere_effects,
                 ),
             )
             .add_systems(
@@ -113,11 +192,18 @@ fn setup_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut sphere_materials: ResMut<Assets<SphereMaterial>>,
+    mut floor_materials: ResMut<Assets<FloorMaterial>>,
     settings: Res<GameSettings>,
+    asset_server: Res<AssetServer>,
 ) {
     // Build and store tier materials
-    let tier_mats = build_tier_materials(&mut materials);
+    let tier_mats = build_tier_materials(&mut sphere_materials);
     commands.insert_resource(tier_mats);
+
+    // Store Retro font handle
+    let font_handle = asset_server.load("fonts/ShareTechMono-Regular.ttf");
+    commands.insert_resource(RetroEffectsAsset { font: font_handle.clone() });
 
     let half_w = settings.arena_width * 0.5;
     let depth = settings.arena_depth;
@@ -127,10 +213,9 @@ fn setup_visuals(
     let center_z = settings.launcher_z - depth * 0.5;
 
     // ---- Floor ----
-    let floor_mat = materials.add(StandardMaterial {
-        base_color: Color::hsl(220.0, 0.12, 0.18),
-        perceptual_roughness: 0.85,
-        ..default()
+    let floor_mat = floor_materials.add(FloorMaterial {
+        grid_color: LinearRgba::from(Color::hsl(120.0, 0.70, 0.55)), // Vibrant phosphor green
+        bg_color: LinearRgba::from(Color::hsl(120.0, 0.20, 0.04)),   // Dark phosphor screen background
     });
     commands.spawn((
         Name::new("Arena Floor"),
@@ -190,25 +275,41 @@ fn setup_visuals(
     ));
 
     // ---- Launcher preview sphere ----
-    commands.spawn((
+    let preview_entity = commands.spawn((
         Name::new("Launcher Preview"),
         LauncherPreview,
         Mesh3d(meshes.add(bevy::math::primitives::Sphere::new(1.0).mesh().uv(32, 18))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: TIER_COLORS[0],
-            emissive: LinearRgba::from(TIER_COLORS[0]) * 0.3,
-            alpha_mode: AlphaMode::Blend,
-            ..default()
+        MeshMaterial3d(sphere_materials.add(SphereMaterial {
+            uniforms: SphereUniforms {
+                color: LinearRgba::from(TIER_COLORS[0]) * 1.5,
+                base_color: LinearRgba::from(TIER_COLORS[0]) * 0.05,
+            },
         })),
         Transform::from_xyz(0.0, 0.0, settings.launcher_z),
         Visibility::Visible,
-    ));
+    )).id();
+
+    // Spawn nested emissive core for preview sphere
+    let core_mesh = meshes.add(bevy::math::primitives::Sphere::new(0.65).mesh().uv(16, 8));
+    let core_mat = materials.add(StandardMaterial {
+        base_color: TIER_COLORS[0],
+        emissive: LinearRgba::from(TIER_COLORS[0]) * 2.0,
+        ..default()
+    });
+    let core_entity = commands.spawn((
+        SphereCore,
+        PreviewCore,
+        Mesh3d(core_mesh),
+        MeshMaterial3d(core_mat),
+    )).id();
+    commands.entity(preview_entity).add_child(core_entity);
 
     // ---- Preview label ----
     commands.spawn((
         PreviewLabel,
         Text2d::new("1"),
         TextFont {
+            font: font_handle.clone(),
             font_size: 22.0,
             ..default()
         },
@@ -217,6 +318,7 @@ fn setup_visuals(
         bevy::text::LineHeight::Px(22.0),
         Transform::from_xyz(0.0, 0.0, 10.0),
         Visibility::Hidden,
+        bevy::camera::visibility::RenderLayers::layer(1),
     ));
 }
 
@@ -228,8 +330,10 @@ fn on_sphere_added(
     trigger: On<Add, Sphere>,
     sphere_query: Query<&Sphere>,
     tier_mats: Option<Res<TierMaterials>>,
+    effects_asset: Option<Res<RetroEffectsAsset>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut std_materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let entity = trigger.event_target();
     let Ok(sphere) = sphere_query.get(entity) else {
@@ -251,28 +355,58 @@ fn on_sphere_added(
         .entity(entity)
         .insert(Visibility::default())
         .with_children(|parent| {
+            // 1. Outer sphere shell using the custom grid shader
             parent.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(mat),
                 SphereVisual,
                 Transform::from_xyz(0.0, 0.0, 0.0),
             ));
+
+            // 2. Nested emissive core
+            let core_color = TIER_COLORS[(sphere.tier as usize).saturating_sub(1).min(8)];
+            let core_mesh = meshes.add(
+                bevy::math::primitives::Sphere::new(radius * 0.65)
+                    .mesh()
+                    .uv(16, 8),
+            );
+            let core_mat = std_materials.add(StandardMaterial {
+                base_color: core_color,
+                emissive: LinearRgba::from(core_color) * 2.0,
+                ..default()
+            });
+            parent.spawn((
+                SphereCore,
+                Mesh3d(core_mesh),
+                MeshMaterial3d(core_mat),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ));
         });
 
     // Spawn a root-level 2D text label that will be screen-projected on top of 3D
-    commands.spawn((
+    let mut label_cmd = commands.spawn((
         BillboardLabel(entity),
         Text2d::new(sphere.tier.to_string()),
-        TextFont {
-            font_size: 22.0,
-            ..default()
-        },
         TextColor(Color::WHITE),
         TextLayout::new_with_justify(Justify::Center),
         bevy::text::LineHeight::Px(22.0),
         Transform::from_xyz(0.0, 0.0, 10.0), // Z coordinate in 2D space
         Visibility::Hidden,
+        bevy::camera::visibility::RenderLayers::layer(1),
     ));
+
+    if let Some(ref asset) = effects_asset {
+        label_cmd.insert(TextFont {
+            font: asset.font.clone(),
+            font_size: 22.0,
+            ..default()
+        });
+    } else {
+        label_cmd.insert(TextFont {
+            font_size: 22.0,
+            ..default()
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -282,7 +416,9 @@ fn on_sphere_added(
 fn update_preview_material(
     queue: Option<Res<DispenserQueue>>,
     tier_mats: Option<Res<TierMaterials>>,
-    mut preview_query: Query<&mut MeshMaterial3d<StandardMaterial>, With<LauncherPreview>>,
+    mut preview_query: Query<&mut MeshMaterial3d<SphereMaterial>, With<LauncherPreview>>,
+    mut preview_core_query: Query<&mut MeshMaterial3d<StandardMaterial>, With<PreviewCore>>,
+    mut std_materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let (Some(queue), Some(tier_mats)) = (queue, tier_mats) else {
         return;
@@ -292,6 +428,15 @@ fn update_preview_material(
         return;
     };
     *mat_handle = MeshMaterial3d(material_for_tier(queue.current, &tier_mats));
+
+    if let Some(mut core_mat_handle) = preview_core_query.iter_mut().next() {
+        let core_color = TIER_COLORS[(queue.current as usize).saturating_sub(1).min(8)];
+        *core_mat_handle = MeshMaterial3d(std_materials.add(StandardMaterial {
+            base_color: core_color,
+            emissive: LinearRgba::from(core_color) * 2.0,
+            ..default()
+        }));
+    }
 }
 
 // Project each label's tracked sphere from 3D world space to 2D screen space.
@@ -498,7 +643,17 @@ fn update_aim_guide_line(
 
 pub fn compute_merge_scale(elapsed: f32, duration: f32) -> f32 {
     let t = (elapsed / duration).clamp(0.0, 1.0);
-    0.8 + t * 0.2
+    // Spring elastic bounce: starts at 0.5, expands quickly to 1.25, and settles back to 1.0
+    if t < 0.3 {
+        let nt = t / 0.3;
+        0.5 + nt * 0.75 // 0.5 -> 1.25
+    } else if t < 0.6 {
+        let nt = (t - 0.3) / 0.3;
+        1.25 - nt * 0.30 // 1.25 -> 0.95
+    } else {
+        let nt = (t - 0.6) / 0.4;
+        0.95 + nt * 0.05 // 0.95 -> 1.0
+    }
 }
 
 pub fn compute_fulfillment_scale(elapsed: f32, duration: f32) -> f32 {
@@ -520,8 +675,8 @@ pub fn compute_fulfillment_scale(elapsed: f32, duration: f32) -> f32 {
 pub fn animate_merged_spawns(
     cooldown_query: Query<&crate::physics::MergeCooldown>,
     fulfilling_query: Query<&crate::game_state::Fulfilling>,
-    mut visual_query: Query<(&ChildOf, &mut Transform), With<SphereVisual>>,
-    mut label_query: Query<(&BillboardLabel, &mut Transform), Without<SphereVisual>>,
+    mut visual_query: Query<(&ChildOf, &mut Transform), Or<(With<SphereVisual>, With<SphereCore>)>>,
+    mut label_query: Query<(&BillboardLabel, &mut Transform), (Without<SphereVisual>, Without<SphereCore>)>,
 ) {
     for (child_of, mut transform) in visual_query.iter_mut() {
         let parent = child_of.0;
@@ -561,8 +716,8 @@ pub fn animate_merged_spawns(
 
 pub fn animate_fulfilling_spheres(
     fulfillment: Option<Res<crate::game_state::ActiveFulfillment>>,
-    mut visual_query: Query<(&ChildOf, &mut Transform), With<SphereVisual>>,
-    mut label_query: Query<(&BillboardLabel, &mut Transform), Without<SphereVisual>>,
+    mut visual_query: Query<(&ChildOf, &mut Transform), Or<(With<SphereVisual>, With<SphereCore>)>>,
+    mut label_query: Query<(&BillboardLabel, &mut Transform), (Without<SphereVisual>, Without<SphereCore>)>,
 ) {
     let Some(fulfillment) = fulfillment else {
         return;
@@ -610,20 +765,162 @@ pub fn cleanup_launcher_visuals(
     }
 }
 
+fn update_sphere_effects(
+    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
+    mut core_query: Query<&mut Visibility, With<SphereCore>>,
+) {
+    let is_effects_on = effects_mode
+        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .unwrap_or(true);
+    
+    let target_vis = if is_effects_on {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    
+    for mut vis in core_query.iter_mut() {
+        crate::utils::set_visibility(&mut vis, target_vis);
+    }
+}
+
+fn update_matrix_particles(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut particle_query: Query<(Entity, &mut Transform, &mut MatrixParticle, &mut TextColor)>,
+) {
+    for (entity, mut transform, mut particle, mut text_color) in particle_query.iter_mut() {
+        particle.lifetime.tick(time.delta());
+        if particle.lifetime.is_finished() {
+            commands.entity(entity).despawn();
+        } else {
+            // Apply velocity
+            transform.translation += particle.velocity * time.delta_secs();
+            
+            // Fade alpha based on remaining lifetime
+            let t = particle.lifetime.fraction();
+            let alpha = (1.0 - t).clamp(0.0, 1.0);
+            
+            if let Color::LinearRgba(ref mut rgba) = text_color.0 {
+                *rgba = LinearRgba::new(rgba.red, rgba.green, rgba.blue, alpha);
+            } else {
+                let to_rgba = text_color.0.to_linear();
+                text_color.0 = Color::LinearRgba(LinearRgba::new(
+                    to_rgba.red,
+                    to_rgba.green,
+                    to_rgba.blue,
+                    alpha,
+                ));
+            }
+        }
+    }
+}
+
 pub fn handle_placeholder_bursts(
+    mut commands: Commands,
+    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
+    effects_asset: Option<Res<RetroEffectsAsset>>,
     mut merge_events: MessageReader<crate::game_state::MergeBurstEvent>,
     mut fulfill_events: MessageReader<crate::game_state::FulfillmentBurstEvent>,
+    camera_query: Query<&GlobalTransform, With<Camera3d>>,
 ) {
+    let is_effects_on = effects_mode
+        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .unwrap_or(true);
+
+    let Some(effects_asset) = effects_asset else {
+        return;
+    };
+
+    let cam_rotation = camera_query
+        .iter()
+        .next()
+        .map(|t| t.compute_transform().rotation)
+        .unwrap_or(Quat::IDENTITY);
+
+    // Read merge events
     for event in merge_events.read() {
-        info!(
-            "PLACEHOLDER: Spawning merge visual burst at {:?} for tier {}",
-            event.position, event.tier
-        );
+        if is_effects_on {
+            let num_particles = 10 + (event.tier as usize) * 2;
+            for _ in 0..num_particles {
+                let offset = Vec3::new(
+                    rand::random_range(-0.5..0.5),
+                    rand::random_range(-0.5..0.5),
+                    rand::random_range(-0.5..0.5),
+                );
+                let pos = event.position + offset;
+                
+                let vel = Vec3::new(
+                    rand::random_range(-0.5..0.5),
+                    rand::random_range(-2.5..-1.0),
+                    rand::random_range(-0.5..0.5),
+                );
+                
+                let chars = ['0', '1', '#', '@', '$', '%', '&', 'X', 'Y', '*'];
+                let char_idx = rand::random_range(0..chars.len());
+                let char_str = chars[char_idx].to_string();
+                
+                let font_size = rand::random_range(16.0..28.0);
+                let lifetime = rand::random_range(0.8..1.5);
+                
+                commands.spawn((
+                    Text2d::new(char_str),
+                    TextFont {
+                        font: effects_asset.font.clone(),
+                        font_size,
+                        ..default()
+                    },
+                    TextColor(Color::hsl(120.0, 0.95, 0.6)),
+                    Transform::from_translation(pos).with_rotation(cam_rotation),
+                    MatrixParticle {
+                        velocity: vel,
+                        lifetime: Timer::from_seconds(lifetime, TimerMode::Once),
+                    },
+                ));
+            }
+        }
     }
+
+    // Read fulfillment events
     for event in fulfill_events.read() {
-        info!(
-            "PLACEHOLDER: Spawning fulfillment visual burst at {:?} for tier {}",
-            event.position, event.tier
-        );
+        if is_effects_on {
+            let num_particles = 25 + (event.tier as usize) * 3;
+            for _ in 0..num_particles {
+                let offset = Vec3::new(
+                    rand::random_range(-0.8..0.8),
+                    rand::random_range(-0.8..0.8),
+                    rand::random_range(-0.8..0.8),
+                );
+                let pos = event.position + offset;
+                
+                let vel = Vec3::new(
+                    rand::random_range(-0.8..0.8),
+                    rand::random_range(-3.5..-1.5),
+                    rand::random_range(-0.8..0.8),
+                );
+                
+                let chars = ['0', '1', '#', '@', '$', '%', '&', 'X', 'Y', '*'];
+                let char_idx = rand::random_range(0..chars.len());
+                let char_str = chars[char_idx].to_string();
+                
+                let font_size = rand::random_range(18.0..32.0);
+                let lifetime = rand::random_range(1.0..2.0);
+                
+                commands.spawn((
+                    Text2d::new(char_str),
+                    TextFont {
+                        font: effects_asset.font.clone(),
+                        font_size,
+                        ..default()
+                    },
+                    TextColor(Color::hsl(120.0, 0.95, 0.65)),
+                    Transform::from_translation(pos).with_rotation(cam_rotation),
+                    MatrixParticle {
+                        velocity: vel,
+                        lifetime: Timer::from_seconds(lifetime, TimerMode::Once),
+                    },
+                ));
+            }
+        }
     }
 }

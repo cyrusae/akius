@@ -238,6 +238,13 @@ pub fn reset_game_state(
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HighScore(pub u32);
 
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisualEffectsMode {
+    #[default]
+    On,
+    Off,
+}
+
 #[derive(Message, Debug, Clone, Copy)]
 pub struct MergeBurstEvent {
     pub position: Vec3,

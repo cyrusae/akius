@@ -8,30 +8,41 @@ mod physics;
 mod utils;
 mod visuals;
 
+mod crt_post_process;
+
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "akiuS".into(),
-                canvas: Some("#bevy-canvas".to_string()),
-                fit_canvas_to_parent: true,
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "akiuS".into(),
+                        canvas: Some("#bevy-canvas".to_string()),
+                        fit_canvas_to_parent: true,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    meta_check: bevy::asset::AssetMetaCheck::Never,
+                    ..default()
+                }),
+        )
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugins(physics::PhysicsPlugin)
         .add_plugins(launcher::LauncherPlugin)
         .add_plugins(visuals::VisualPlugin)
         .add_plugins(hud::HudPlugin)
+        .add_plugins(crt_post_process::CrtPostProcessPlugin)
         .init_state::<game_state::AppState>()
         .insert_resource(game_state::GameSettings::default())
         .insert_resource(game_state::Score::default())
         .insert_resource(game_state::ColorblindMode::default())
         .insert_resource(game_state::AimLineMode::default())
+        .insert_resource(game_state::VisualEffectsMode::default())
         .insert_resource(game_state::ActiveOrder { target_tier: 6 })
         .insert_resource(game_state::DispenserQueue {
             current: 1,
@@ -90,6 +101,10 @@ fn setup_camera_and_light(mut commands: Commands) {
     // 3D perspective camera for the game scene.
     commands.spawn((
         Camera3d::default(),
+        Camera {
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            ..default()
+        },
         Transform::from_xyz(0.0, 15.0, 18.0).looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::Y),
     ));
 
@@ -101,12 +116,13 @@ fn setup_camera_and_light(mut commands: Commands) {
             order: 1,
             ..default()
         },
+        bevy::camera::visibility::RenderLayers::layer(1),
     ));
 
     commands.spawn((
         DirectionalLight {
             illuminance: 8_000.0,
-            shadows_enabled: true,
+            shadows_enabled: false,
             ..default()
         },
         Transform::from_xyz(4.0, 10.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
