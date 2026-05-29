@@ -62,6 +62,7 @@ pub fn update_launcher_aiming(
     >,
     mut launcher_state: ResMut<LauncherState>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    touches: Res<Touches>,
     time: Res<Time>,
 ) {
     let half_width = settings.arena_width * 0.5;
@@ -69,30 +70,38 @@ pub fn update_launcher_aiming(
     let preview_radius = crate::core_math::get_radius(current_tier);
     let limit_x = (half_width - preview_radius).max(0.0);
 
-    // 1. Get cursor position and check if it moved
+    // 1. Get position from touch or cursor
     let mut new_target_x = None;
-    let mut current_cursor_position = None;
+    let mut current_input_position = None;
+    let mut is_touch = false;
 
-    if let Ok(window) = window_query.single() {
-        if let Some(cursor_pos) = window.cursor_position() {
-            current_cursor_position = Some(cursor_pos);
-            if let Ok((camera, camera_transform)) = camera_query.single() {
-                if let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) {
-                    let dir_y = ray.direction.y;
-                    if dir_y.abs() >= 1e-6 {
-                        let t = -ray.origin.y / dir_y;
-                        if t >= 0.0 {
-                            let intersection_point = ray.origin + t * *ray.direction;
-                            new_target_x = Some(intersection_point.x.clamp(-limit_x, limit_x));
-                        }
+    if let Some(touch_pos) = touches.first_pressed_position() {
+        current_input_position = Some(touch_pos);
+        is_touch = true;
+    } else if let Ok(window) = window_query.single() {
+        current_input_position = window.cursor_position();
+    }
+
+    if let Some(input_pos) = current_input_position {
+        if let Ok((camera, camera_transform)) = camera_query.single() {
+            if let Ok(ray) = camera.viewport_to_world(camera_transform, input_pos) {
+                let dir_y = ray.direction.y;
+                if dir_y.abs() >= 1e-6 {
+                    let t = -ray.origin.y / dir_y;
+                    if t >= 0.0 {
+                        let intersection_point = ray.origin + t * *ray.direction;
+                        new_target_x = Some(intersection_point.x.clamp(-limit_x, limit_x));
                     }
                 }
             }
         }
     }
 
-    let cursor_moved = if let Some(pos) = current_cursor_position {
-        if let Some(last_pos) = launcher_state.last_cursor_position {
+    let input_moved = if let Some(pos) = current_input_position {
+        if is_touch {
+            // Touch targeting directly controls launcher positioning
+            true
+        } else if let Some(last_pos) = launcher_state.last_cursor_position {
             (pos - last_pos).length_squared() > 1e-4
         } else {
             true
@@ -101,9 +110,9 @@ pub fn update_launcher_aiming(
         false
     };
 
-    // 2. Decide target_x source (cursor vs keyboard)
+    // 2. Decide target_x source (input vs keyboard)
     let mut clamped_x = launcher_state.target_x;
-    if cursor_moved {
+    if input_moved {
         if let Some(x) = new_target_x {
             clamped_x = x;
         }
@@ -124,8 +133,12 @@ pub fn update_launcher_aiming(
         }
     }
 
-    // Always update last cursor position
-    launcher_state.last_cursor_position = current_cursor_position;
+    // Always update last input position if not touch
+    if !is_touch {
+        launcher_state.last_cursor_position = current_input_position;
+    } else {
+        launcher_state.last_cursor_position = None;
+    }
 
     // Compute 1D forbidden intervals on the launcher line (Z = settings.launcher_z)
     let mut intervals: Vec<(f32, f32)> = Vec::new();
@@ -236,6 +249,7 @@ pub fn handle_launch_input(
     mut commands: Commands,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    touches: Res<Touches>,
     settings: Res<GameSettings>,
     dispenser_queue: Option<ResMut<crate::game_state::DispenserQueue>>,
     mut launcher_state: ResMut<LauncherState>,
@@ -246,8 +260,14 @@ pub fn handle_launch_input(
     launcher_state.cooldown_timer.tick(time.delta());
 
     let over_ui = interaction_query.iter().any(|&i| i != Interaction::None);
-    let fire_pressed = (mouse_button_input.just_pressed(MouseButton::Left) && !over_ui)
-        || keyboard_input.just_pressed(KeyCode::Space);
+    let is_touch_active = touches.iter().next().is_some() || touches.any_just_released();
+
+    let fire_pressed = if is_touch_active {
+        touches.any_just_released() && !over_ui
+    } else {
+        (mouse_button_input.just_pressed(MouseButton::Left) && !over_ui)
+            || keyboard_input.just_pressed(KeyCode::Space)
+    };
 
     let merge_active = !merge_cooldowns.is_empty();
 
@@ -309,6 +329,7 @@ mod tests {
         app.insert_resource(GameSettings::default());
         app.insert_resource(LauncherState::default());
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(Touches::default());
         app.insert_resource(Time::<()>::default());
 
         let camera_transform = Transform::from_xyz(0.0, 10.0, 0.0).looking_at(Vec3::ZERO, -Vec3::Z);
@@ -393,6 +414,7 @@ mod tests {
         });
         app.insert_resource(ButtonInput::<MouseButton>::default());
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(Touches::default());
         app.insert_resource(Time::<()>::default());
         app.add_systems(Update, handle_launch_input);
 
@@ -439,6 +461,7 @@ mod tests {
         });
         app.insert_resource(ButtonInput::<MouseButton>::default());
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(Touches::default());
         app.insert_resource(Time::<()>::default());
         app.add_systems(Update, handle_launch_input);
 
@@ -487,6 +510,7 @@ mod tests {
         });
         app.insert_resource(ButtonInput::<MouseButton>::default());
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(Touches::default());
         app.insert_resource(Time::<()>::default());
         app.add_systems(Update, handle_launch_input);
 

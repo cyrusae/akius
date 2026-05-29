@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity, clippy::too_many_arguments)]
+
 mod core_math;
 mod game_state;
 mod hud;
@@ -53,8 +55,34 @@ fn main() {
             )
                 .run_if(in_state(game_state::AppState::InGame)),
         )
-        .add_systems(Update, game_state::update_high_score)
+        .add_systems(Update, (game_state::update_high_score, adjust_camera_fov))
         .run();
+}
+
+/// Dynamically adjusts the camera's vertical FOV on narrow screens to prevent horizontal clipping of the board.
+fn adjust_camera_fov(
+    window_query: Query<&Window>,
+    mut camera_query: Query<&mut Projection, With<Camera3d>>,
+) {
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+    let Ok(mut projection) = camera_query.single_mut() else {
+        return;
+    };
+
+    if let Projection::Perspective(ref mut perspective) = *projection {
+        let aspect_ratio = window.width() / window.height();
+        if aspect_ratio < 1.0 {
+            // Keep the horizontal field of view constant by adjusting vertical fov:
+            // tan(fov_v / 2) = tan(fov_h_desired / 2) / aspect_ratio
+            // Target a horizontal FOV half-angle tangent of 0.5317.
+            let desired_fov_v = 2.0 * (0.5317 / aspect_ratio).atan();
+            perspective.fov = desired_fov_v.clamp(std::f32::consts::FRAC_PI_4, 1.6);
+        } else {
+            perspective.fov = std::f32::consts::FRAC_PI_4;
+        }
+    }
 }
 
 /// Camera and lighting only — scene geometry is handled by VisualPlugin.

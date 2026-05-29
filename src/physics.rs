@@ -140,15 +140,16 @@ pub fn check_distance_merges(
                 let threshold = r1 + r2 + 0.07;
                 let dist = t1.translation.distance(t2.translation);
 
-                if dist < threshold {
-                    if !merged_this_frame.contains(&e1) && !merged_this_frame.contains(&e2) {
-                        merged_this_frame.insert(e1);
-                        merged_this_frame.insert(e2);
-                        merge_events.write(MergeEvent {
-                            entity_a: e1,
-                            entity_b: e2,
-                        });
-                    }
+                if dist < threshold
+                    && !merged_this_frame.contains(&e1)
+                    && !merged_this_frame.contains(&e2)
+                {
+                    merged_this_frame.insert(e1);
+                    merged_this_frame.insert(e2);
+                    merge_events.write(MergeEvent {
+                        entity_a: e1,
+                        entity_b: e2,
+                    });
                 }
             }
         }
