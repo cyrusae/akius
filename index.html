@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     
 <script type="module">
-import init, * as bindings from '/akius/akius-18ead93ef7a03b67.js';
-const wasm = await init({ module_or_path: '/akius/akius-18ead93ef7a03b67_bg.wasm' });
+import init, * as bindings from '/akius/akius-e81527b0c95d5f67.js';
+const wasm = await init({ module_or_path: '/akius/akius-e81527b0c95d5f67_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -37,7 +37,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             outline: none;
         }
     </style>
-<link rel="modulepreload" href="/akius/akius-18ead93ef7a03b67.js" crossorigin="anonymous" integrity="sha384-PrJ5sZHNwfm6W+D+rueSHpiT794WtfL53MPaT5SVfswYydTT+rX2Mg4c4YXUDxpa"><link rel="preload" href="/akius/akius-18ead93ef7a03b67_bg.wasm" crossorigin="anonymous" integrity="sha384-6mAxUwUlykF6zWS32o8ewU3np8j9zVCCopEUQ5jxswbXp2uDpFLHpCZqe6tGjoSc" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/akius/akius-e81527b0c95d5f67.js" crossorigin="anonymous" integrity="sha384-PrJ5sZHNwfm6W+D+rueSHpiT794WtfL53MPaT5SVfswYydTT+rX2Mg4c4YXUDxpa"><link rel="preload" href="/akius/akius-e81527b0c95d5f67_bg.wasm" crossorigin="anonymous" integrity="sha384-SB6LZzulM2qDLhUx6iQHssWTPYmOyeYutDym6f5jvLU0/MXtIdDg316Ss4DNu9Eg" as="fetch" type="application/wasm"></head>
 <body>
     <canvas id="bevy-canvas" tabindex="1" autofocus></canvas>
     <script>
