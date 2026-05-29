@@ -297,9 +297,6 @@ fn setup_hud(mut commands: Commands) {
 fn update_score_hud(
     score: Option<Res<Score>>,
     high_score: Option<Res<crate::game_state::HighScore>>,
-    touches: Res<Touches>,
-    window_query: Query<&Window>,
-    camera_query: Query<&Projection, With<Camera3d>>,
     mut query: Query<&mut Text, With<ScoreText>>,
 ) {
     let Some(score) = score else {
@@ -309,35 +306,7 @@ fn update_score_hud(
         return;
     };
     let hi = high_score.map(|h| h.0).unwrap_or(0);
-
-    // Diagnostics telemetry
-    let touch_info = if let Some(pos) = touches.first_pressed_position() {
-        format!("Touch:({:.0},{:.0})", pos.x, pos.y)
-    } else {
-        "Touch:None".to_string()
-    };
-
-    let window_info = if let Ok(window) = window_query.single() {
-        format!(
-            "Win:({:.0}x{:.0}) Scale:{:.1}",
-            window.width(),
-            window.height(),
-            window.scale_factor()
-        )
-    } else {
-        "Win:None".to_string()
-    };
-
-    let fov_info = if let Ok(Projection::Perspective(p)) = camera_query.single() {
-        format!("FOV:{:.2}", p.fov)
-    } else {
-        "FOV:None".to_string()
-    };
-
-    let new_text = format!(
-        "Score: {}  HI: {}\n{}  {}  {}",
-        score.total, hi, touch_info, window_info, fov_info
-    );
+    let new_text = format!("Score: {}  HI: {}", score.total, hi);
     if text.0 != new_text {
         text.0 = new_text;
     }

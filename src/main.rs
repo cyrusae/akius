@@ -76,9 +76,9 @@ fn adjust_camera_fov(
         if aspect_ratio < 1.0 {
             // Keep the horizontal field of view constant by adjusting vertical fov:
             // tan(fov_v / 2) = tan(fov_h_desired / 2) / aspect_ratio
-            // Target a horizontal FOV half-angle tangent of 0.5317.
-            let desired_fov_v = 2.0 * (0.5317 / aspect_ratio).atan();
-            perspective.fov = desired_fov_v.clamp(std::f32::consts::FRAC_PI_4, 1.6);
+            // Target a horizontal FOV half-angle tangent of 0.34 to keep board tight.
+            let desired_fov_v = 2.0 * (0.34 / aspect_ratio).atan();
+            perspective.fov = desired_fov_v.clamp(std::f32::consts::FRAC_PI_4, 1.2);
         } else {
             perspective.fov = std::f32::consts::FRAC_PI_4;
         }
