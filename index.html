@@ -3,10 +3,11 @@
 <head>
     <meta charset="utf-8">
     <title>akiuS</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     
 <script type="module">
-import init, * as bindings from '/akius/akius-41350580291c0497.js';
-const wasm = await init({ module_or_path: '/akius/akius-41350580291c0497_bg.wasm' });
+import init, * as bindings from '/akius/akius-18ead93ef7a03b67.js';
+const wasm = await init({ module_or_path: '/akius/akius-18ead93ef7a03b67_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,12 +31,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             display: block;
             width: 100%;
             height: 100%;
+            touch-action: none;
         }
         canvas:focus {
             outline: none;
         }
     </style>
-<link rel="modulepreload" href="/akius/akius-41350580291c0497.js" crossorigin="anonymous" integrity="sha384-PrJ5sZHNwfm6W+D+rueSHpiT794WtfL53MPaT5SVfswYydTT+rX2Mg4c4YXUDxpa"><link rel="preload" href="/akius/akius-41350580291c0497_bg.wasm" crossorigin="anonymous" integrity="sha384-yX/LznAsYP8h6Voqt2yv6K2z5eCyBhsDpQG2C185diO6JCAHqO10XKeOCP2P/IQn" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/akius/akius-18ead93ef7a03b67.js" crossorigin="anonymous" integrity="sha384-PrJ5sZHNwfm6W+D+rueSHpiT794WtfL53MPaT5SVfswYydTT+rX2Mg4c4YXUDxpa"><link rel="preload" href="/akius/akius-18ead93ef7a03b67_bg.wasm" crossorigin="anonymous" integrity="sha384-6mAxUwUlykF6zWS32o8ewU3np8j9zVCCopEUQ5jxswbXp2uDpFLHpCZqe6tGjoSc" as="fetch" type="application/wasm"></head>
 <body>
     <canvas id="bevy-canvas" tabindex="1" autofocus></canvas>
     <script>
