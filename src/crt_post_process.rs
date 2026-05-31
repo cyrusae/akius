@@ -12,7 +12,8 @@ use bevy::{
     shader::ShaderRef,
 };
 
-pub const CRT_POST_PROCESS_SHADER_HANDLE: Handle<Shader> = bevy::asset::uuid_handle!("98374291-8734-9187-2391-287349187239");
+pub const CRT_POST_PROCESS_SHADER_HANDLE: Handle<Shader> =
+    bevy::asset::uuid_handle!("98374291-8734-9187-2391-287349187239");
 
 #[derive(Component, ExtractComponent, Clone, Copy, ShaderType, Default)]
 pub struct CrtPostProcessSettings {

@@ -6,7 +6,7 @@ struct SphereUniforms {
     base_color: vec4<f32>,
 }
 
-@group(2) @binding(0) var<uniform> uniforms: SphereUniforms;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: SphereUniforms;
 
 @fragment
 fn fragment(
@@ -36,5 +36,7 @@ fn fragment(
         final_color = final_color * 1.4;
     }
     
-    return vec4<f32>(final_color, 1.0);
+    // Set transparency: grid lines are fully opaque, grid gaps are semi-transparent
+    let alpha = mix(0.15, 1.0, is_line);
+    return vec4<f32>(final_color, alpha);
 }

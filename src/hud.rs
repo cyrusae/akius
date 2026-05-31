@@ -44,7 +44,6 @@ pub struct EffectsButton;
 #[derive(Component)]
 pub struct EffectsButtonText;
 
-
 #[derive(Component)]
 pub struct WinScreen;
 
@@ -375,10 +374,7 @@ fn update_order_hud(
 }
 
 fn handle_effects_button(
-    mut interaction_query: Query<
-        &Interaction,
-        (Changed<Interaction>, With<EffectsButton>),
-    >,
+    mut interaction_query: Query<&Interaction, (Changed<Interaction>, With<EffectsButton>)>,
     mut effects_mode: ResMut<crate::game_state::VisualEffectsMode>,
     keyboard: Res<ButtonInput<KeyCode>>,
 ) {

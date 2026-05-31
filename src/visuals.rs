@@ -60,8 +60,14 @@ pub struct AimGuideLine;
 // Resources & Custom Materials
 // ---------------------------------------------------------------------------
 
-pub const SPHERE_GRID_SHADER_HANDLE: Handle<Shader> = bevy::asset::uuid_handle!("28394710-9283-7498-1273-918231273491");
-pub const FLOOR_GRID_SHADER_HANDLE: Handle<Shader> = bevy::asset::uuid_handle!("17283947-1928-3749-1827-394817293847");
+pub const SPHERE_GRID_SHADER_HANDLE: Handle<Shader> =
+    bevy::asset::uuid_handle!("28394710-9283-7498-1273-918231273491");
+pub const FLOOR_GRID_SHADER_HANDLE: Handle<Shader> =
+    bevy::asset::uuid_handle!("17283947-1928-3749-1827-394817293847");
+pub const LASER_LINE_SHADER_HANDLE: Handle<Shader> =
+    bevy::asset::uuid_handle!("38294710-9283-7498-1273-918231273492");
+pub const RETICLE_SHADER_HANDLE: Handle<Shader> =
+    bevy::asset::uuid_handle!("48294710-9283-7498-1273-918231273493");
 
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub struct SphereUniforms {
@@ -79,14 +85,22 @@ impl Material for SphereMaterial {
     fn fragment_shader() -> ShaderRef {
         ShaderRef::Handle(SPHERE_GRID_SHADER_HANDLE)
     }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Blend
+    }
+}
+
+#[derive(ShaderType, Clone, Copy, Debug)]
+pub struct FloorUniforms {
+    pub grid_color: LinearRgba,
+    pub bg_color: LinearRgba,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct FloorMaterial {
     #[uniform(0)]
-    pub grid_color: LinearRgba,
-    #[uniform(0)]
-    pub bg_color: LinearRgba,
+    pub uniforms: FloorUniforms,
 }
 
 impl Material for FloorMaterial {
@@ -94,6 +108,60 @@ impl Material for FloorMaterial {
         ShaderRef::Handle(FLOOR_GRID_SHADER_HANDLE)
     }
 }
+
+#[derive(ShaderType, Clone, Copy, Debug)]
+pub struct LaserUniforms {
+    pub color: LinearRgba,
+    pub time: f32,
+    pub _padding1: f32,
+    pub _padding2: f32,
+    pub _padding3: f32,
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct LaserMaterial {
+    #[uniform(0)]
+    pub uniforms: LaserUniforms,
+}
+
+impl Material for LaserMaterial {
+    fn fragment_shader() -> ShaderRef {
+        ShaderRef::Handle(LASER_LINE_SHADER_HANDLE)
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Blend
+    }
+}
+
+#[derive(ShaderType, Clone, Copy, Debug)]
+pub struct ReticleUniforms {
+    pub color: LinearRgba,
+    pub time: f32,
+    pub _padding1: f32,
+    pub _padding2: f32,
+    pub _padding3: f32,
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct ReticleMaterial {
+    #[uniform(0)]
+    pub uniforms: ReticleUniforms,
+}
+
+impl Material for ReticleMaterial {
+    fn fragment_shader() -> ShaderRef {
+        ShaderRef::Handle(RETICLE_SHADER_HANDLE)
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Blend
+    }
+}
+
+/// Tag on the targeting reticle quad entity.
+#[derive(Component)]
+pub struct TargetingReticle;
 
 #[derive(Resource)]
 pub struct RetroEffectsAsset {
@@ -147,15 +215,30 @@ fn setup_visuals_shaders(mut shaders: ResMut<Assets<Shader>>) {
             "shaders/floor_grid.wgsl",
         ),
     );
+    let _ = shaders.insert(
+        &LASER_LINE_SHADER_HANDLE,
+        Shader::from_wgsl(
+            include_str!("../assets/shaders/laser_line.wgsl"),
+            "shaders/laser_line.wgsl",
+        ),
+    );
+    let _ = shaders.insert(
+        &RETICLE_SHADER_HANDLE,
+        Shader::from_wgsl(
+            include_str!("../assets/shaders/reticle.wgsl"),
+            "shaders/reticle.wgsl",
+        ),
+    );
 }
 
 pub struct VisualPlugin;
 
 impl Plugin for VisualPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .add_plugins(MaterialPlugin::<SphereMaterial>::default())
+        app.add_plugins(MaterialPlugin::<SphereMaterial>::default())
             .add_plugins(MaterialPlugin::<FloorMaterial>::default())
+            .add_plugins(MaterialPlugin::<LaserMaterial>::default())
+            .add_plugins(MaterialPlugin::<ReticleMaterial>::default())
             .add_systems(PreStartup, setup_visuals_shaders)
             // Systems
             .add_systems(Startup, setup_visuals)
@@ -167,6 +250,7 @@ impl Plugin for VisualPlugin {
                     update_labels_screen_position,
                     handle_keyboard_toggles,
                     update_aim_guide_line,
+                    update_targeting_reticle,
                     animate_merged_spawns,
                     animate_fulfilling_spheres,
                     cleanup_orphaned_labels,
@@ -194,6 +278,8 @@ fn setup_visuals(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut sphere_materials: ResMut<Assets<SphereMaterial>>,
     mut floor_materials: ResMut<Assets<FloorMaterial>>,
+    mut laser_materials: ResMut<Assets<LaserMaterial>>,
+    mut reticle_materials: ResMut<Assets<ReticleMaterial>>,
     settings: Res<GameSettings>,
     asset_server: Res<AssetServer>,
 ) {
@@ -203,7 +289,9 @@ fn setup_visuals(
 
     // Store Retro font handle
     let font_handle = asset_server.load("fonts/ShareTechMono-Regular.ttf");
-    commands.insert_resource(RetroEffectsAsset { font: font_handle.clone() });
+    commands.insert_resource(RetroEffectsAsset {
+        font: font_handle.clone(),
+    });
 
     let half_w = settings.arena_width * 0.5;
     let depth = settings.arena_depth;
@@ -214,27 +302,24 @@ fn setup_visuals(
 
     // ---- Floor ----
     let floor_mat = floor_materials.add(FloorMaterial {
-        grid_color: LinearRgba::from(Color::hsl(120.0, 0.70, 0.55)), // Vibrant phosphor green
-        bg_color: LinearRgba::from(Color::hsl(120.0, 0.20, 0.04)),   // Dark phosphor screen background
+        uniforms: FloorUniforms {
+            grid_color: LinearRgba::from(Color::hsl(120.0, 0.50, 0.28)), // Muted ghostly phosphor green
+            bg_color: LinearRgba::from(Color::BLACK), // Transparent/black background
+        },
     });
     commands.spawn((
         Name::new("Arena Floor"),
         Mesh3d(meshes.add(Cuboid::new(settings.arena_width, 0.1, depth))),
-        MeshMaterial3d(floor_mat),
+        MeshMaterial3d(floor_mat.clone()),
         Transform::from_xyz(0.0, -0.05, center_z),
         Collider::cuboid(settings.arena_width * 0.5, 0.05, depth * 0.5),
     ));
 
     // ---- Left wall ----
-    let wall_mat = materials.add(StandardMaterial {
-        base_color: Color::hsl(220.0, 0.15, 0.25),
-        perceptual_roughness: 0.8,
-        ..default()
-    });
     commands.spawn((
         Name::new("Wall Left"),
         Mesh3d(meshes.add(Cuboid::new(0.2, wh, depth))),
-        MeshMaterial3d(wall_mat.clone()),
+        MeshMaterial3d(floor_mat.clone()),
         Transform::from_xyz(-half_w - 0.1, wh * 0.5, center_z),
         Collider::cuboid(0.1, wh * 0.5, depth * 0.5),
     ));
@@ -243,7 +328,7 @@ fn setup_visuals(
     commands.spawn((
         Name::new("Wall Right"),
         Mesh3d(meshes.add(Cuboid::new(0.2, wh, depth))),
-        MeshMaterial3d(wall_mat.clone()),
+        MeshMaterial3d(floor_mat.clone()),
         Transform::from_xyz(half_w + 0.1, wh * 0.5, center_z),
         Collider::cuboid(0.1, wh * 0.5, depth * 0.5),
     ));
@@ -252,42 +337,65 @@ fn setup_visuals(
     commands.spawn((
         Name::new("Wall Back"),
         Mesh3d(meshes.add(Cuboid::new(settings.arena_width + 0.4, wh, 0.2))),
-        MeshMaterial3d(wall_mat),
+        MeshMaterial3d(floor_mat.clone()),
         Transform::from_xyz(0.0, wh * 0.5, settings.launcher_z - depth - 0.1),
         Collider::cuboid(settings.arena_width * 0.5 + 0.2, wh * 0.5, 0.1),
     ));
 
-    // ---- Aim guide line ----
-    let guide_mat = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.0, 0.8, 0.0, 0.15), // Faint green
-        perceptual_roughness: 1.0,
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default()
+    // ---- Aim guide line (laser pointer) ----
+    let laser_mat = laser_materials.add(LaserMaterial {
+        uniforms: LaserUniforms {
+            color: LinearRgba::from(TIER_COLORS[0]),
+            time: 0.0,
+            _padding1: 0.0,
+            _padding2: 0.0,
+            _padding3: 0.0,
+        },
     });
     commands.spawn((
         Name::new("Aim Guide Line"),
         AimGuideLine,
-        Mesh3d(meshes.add(Cuboid::new(0.02, 0.005, depth))),
-        MeshMaterial3d(guide_mat),
-        Transform::from_xyz(0.0, 0.005, center_z),
+        Mesh3d(meshes.add(Cuboid::new(0.25, 0.001, depth))),
+        MeshMaterial3d(laser_mat),
+        Transform::from_xyz(0.0, 0.003, center_z),
+        Visibility::Hidden,
+    ));
+
+    // ---- Targeting reticle flat ring system ----
+    let reticle_mat = reticle_materials.add(ReticleMaterial {
+        uniforms: ReticleUniforms {
+            color: LinearRgba::from(TIER_COLORS[0]),
+            time: 0.0,
+            _padding1: 0.0,
+            _padding2: 0.0,
+            _padding3: 0.0,
+        },
+    });
+    commands.spawn((
+        Name::new("Targeting Reticle"),
+        TargetingReticle,
+        Mesh3d(meshes.add(Rectangle::new(1.0, 1.0))),
+        MeshMaterial3d(reticle_mat),
+        Transform::from_xyz(0.0, 0.002, settings.launcher_z).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
         Visibility::Hidden,
     ));
 
     // ---- Launcher preview sphere ----
-    let preview_entity = commands.spawn((
-        Name::new("Launcher Preview"),
-        LauncherPreview,
-        Mesh3d(meshes.add(bevy::math::primitives::Sphere::new(1.0).mesh().uv(32, 18))),
-        MeshMaterial3d(sphere_materials.add(SphereMaterial {
-            uniforms: SphereUniforms {
-                color: LinearRgba::from(TIER_COLORS[0]) * 1.5,
-                base_color: LinearRgba::from(TIER_COLORS[0]) * 0.05,
-            },
-        })),
-        Transform::from_xyz(0.0, 0.0, settings.launcher_z),
-        Visibility::Visible,
-    )).id();
+    let preview_entity = commands
+        .spawn((
+            Name::new("Launcher Preview"),
+            LauncherPreview,
+            Mesh3d(meshes.add(bevy::math::primitives::Sphere::new(1.0).mesh().uv(32, 18))),
+            MeshMaterial3d(sphere_materials.add(SphereMaterial {
+                uniforms: SphereUniforms {
+                    color: LinearRgba::from(TIER_COLORS[0]) * 1.5,
+                    base_color: LinearRgba::from(TIER_COLORS[0]) * 0.05,
+                },
+            })),
+            Transform::from_xyz(0.0, 0.0, settings.launcher_z),
+            Visibility::Visible,
+        ))
+        .id();
 
     // Spawn nested emissive core for preview sphere
     let core_mesh = meshes.add(bevy::math::primitives::Sphere::new(0.65).mesh().uv(16, 8));
@@ -296,12 +404,15 @@ fn setup_visuals(
         emissive: LinearRgba::from(TIER_COLORS[0]) * 2.0,
         ..default()
     });
-    let core_entity = commands.spawn((
-        SphereCore,
-        PreviewCore,
-        Mesh3d(core_mesh),
-        MeshMaterial3d(core_mat),
-    )).id();
+    let core_entity = commands
+        .spawn((
+            SphereCore,
+            PreviewCore,
+            Mesh3d(core_mesh),
+            MeshMaterial3d(core_mat),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ))
+        .id();
     commands.entity(preview_entity).add_child(core_entity);
 
     // ---- Preview label ----
@@ -625,16 +736,78 @@ fn handle_keyboard_toggles(
 fn update_aim_guide_line(
     aim_line_mode: Res<AimLineMode>,
     launcher_state: Res<LauncherState>,
+    dispenser_queue: Option<Res<DispenserQueue>>,
+    time: Res<Time>,
     state: Option<Res<State<crate::game_state::AppState>>>,
-    mut query: Query<(&mut Transform, &mut Visibility), With<AimGuideLine>>,
+    mut query: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<LaserMaterial>), With<AimGuideLine>>,
+    mut laser_materials: ResMut<Assets<LaserMaterial>>,
 ) {
-    if let Ok((mut transform, mut visibility)) = query.single_mut() {
+    if let Ok((mut transform, mut visibility, mat_handle)) = query.single_mut() {
         let is_in_game = state
             .map(|s| *s.get() == crate::game_state::AppState::InGame)
             .unwrap_or(false);
         if aim_line_mode.0 && is_in_game {
             crate::utils::set_visibility(&mut visibility, Visibility::Visible);
             transform.translation.x = launcher_state.active_x;
+            
+            if let Some(mat) = laser_materials.get_mut(&mat_handle.0) {
+                let current_tier = dispenser_queue.as_ref().map(|dq| dq.current).unwrap_or(1);
+                let color = TIER_COLORS[(current_tier as usize).saturating_sub(1).min(8)];
+                mat.uniforms.color = LinearRgba::from(color);
+                mat.uniforms.time = time.elapsed_secs();
+            }
+        } else {
+            crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
+        }
+    }
+}
+
+fn update_targeting_reticle(
+    launcher_state: Res<LauncherState>,
+    settings: Res<GameSettings>,
+    dispenser_queue: Option<Res<DispenserQueue>>,
+    time: Res<Time>,
+    state: Option<Res<State<crate::game_state::AppState>>>,
+    mut query: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<ReticleMaterial>), With<TargetingReticle>>,
+    mut reticle_materials: ResMut<Assets<ReticleMaterial>>,
+    preview_query: Query<&Transform, (With<LauncherPreview>, Without<TargetingReticle>)>,
+) {
+    if let Ok((mut transform, mut visibility, mat_handle)) = query.single_mut() {
+        let is_in_game = state
+            .map(|s| *s.get() == crate::game_state::AppState::InGame)
+            .unwrap_or(false);
+        
+        if is_in_game {
+            let elapsed = launcher_state.cooldown_timer.elapsed_secs();
+            let is_preview_visible = launcher_state.cooldown_timer.is_finished() || elapsed >= 0.4;
+            
+            if is_preview_visible {
+                crate::utils::set_visibility(&mut visibility, Visibility::Visible);
+                
+                let current_tier = dispenser_queue.as_ref().map(|dq| dq.current).unwrap_or(1);
+                let radius = crate::core_math::get_radius(current_tier);
+                
+                // Align reticle position perfectly with the preview sphere center
+                if let Ok(preview_transform) = preview_query.single() {
+                    transform.translation = preview_transform.translation;
+                } else {
+                    transform.translation.x = launcher_state.active_x;
+                    transform.translation.y = radius;
+                    transform.translation.z = settings.launcher_z;
+                }
+                
+                // Scale reticle to frame the sphere nicely
+                let reticle_scale = radius * 4.2;
+                transform.scale = Vec3::splat(reticle_scale);
+                
+                if let Some(mat) = reticle_materials.get_mut(&mat_handle.0) {
+                    let color = TIER_COLORS[(current_tier as usize).saturating_sub(1).min(8)];
+                    mat.uniforms.color = LinearRgba::from(color);
+                    mat.uniforms.time = time.elapsed_secs();
+                }
+            } else {
+                crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
+            }
         } else {
             crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
         }
@@ -676,7 +849,10 @@ pub fn animate_merged_spawns(
     cooldown_query: Query<&crate::physics::MergeCooldown>,
     fulfilling_query: Query<&crate::game_state::Fulfilling>,
     mut visual_query: Query<(&ChildOf, &mut Transform), Or<(With<SphereVisual>, With<SphereCore>)>>,
-    mut label_query: Query<(&BillboardLabel, &mut Transform), (Without<SphereVisual>, Without<SphereCore>)>,
+    mut label_query: Query<
+        (&BillboardLabel, &mut Transform),
+        (Without<SphereVisual>, Without<SphereCore>),
+    >,
 ) {
     for (child_of, mut transform) in visual_query.iter_mut() {
         let parent = child_of.0;
@@ -717,7 +893,10 @@ pub fn animate_merged_spawns(
 pub fn animate_fulfilling_spheres(
     fulfillment: Option<Res<crate::game_state::ActiveFulfillment>>,
     mut visual_query: Query<(&ChildOf, &mut Transform), Or<(With<SphereVisual>, With<SphereCore>)>>,
-    mut label_query: Query<(&BillboardLabel, &mut Transform), (Without<SphereVisual>, Without<SphereCore>)>,
+    mut label_query: Query<
+        (&BillboardLabel, &mut Transform),
+        (Without<SphereVisual>, Without<SphereCore>),
+    >,
 ) {
     let Some(fulfillment) = fulfillment else {
         return;
@@ -772,13 +951,13 @@ fn update_sphere_effects(
     let is_effects_on = effects_mode
         .map(|m| *m == crate::game_state::VisualEffectsMode::On)
         .unwrap_or(true);
-    
+
     let target_vis = if is_effects_on {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
-    
+
     for mut vis in core_query.iter_mut() {
         crate::utils::set_visibility(&mut vis, target_vis);
     }
@@ -787,20 +966,32 @@ fn update_sphere_effects(
 fn update_matrix_particles(
     mut commands: Commands,
     time: Res<Time>,
-    mut particle_query: Query<(Entity, &mut Transform, &mut MatrixParticle, &mut TextColor)>,
+    mut particle_query: Query<(
+        Entity,
+        &mut Transform,
+        &mut MatrixParticle,
+        &mut TextColor,
+        &mut Visibility,
+    )>,
 ) {
-    for (entity, mut transform, mut particle, mut text_color) in particle_query.iter_mut() {
+    for (entity, mut transform, mut particle, mut text_color, mut visibility) in
+        particle_query.iter_mut()
+    {
         particle.lifetime.tick(time.delta());
         if particle.lifetime.is_finished() {
             commands.entity(entity).despawn();
         } else {
+            // Make particle visible after layout is computed (avoids flashing at origin)
+            if *visibility == Visibility::Hidden {
+                *visibility = Visibility::Inherited;
+            }
             // Apply velocity
             transform.translation += particle.velocity * time.delta_secs();
-            
+
             // Fade alpha based on remaining lifetime
             let t = particle.lifetime.fraction();
             let alpha = (1.0 - t).clamp(0.0, 1.0);
-            
+
             if let Color::LinearRgba(ref mut rgba) = text_color.0 {
                 *rgba = LinearRgba::new(rgba.red, rgba.green, rgba.blue, alpha);
             } else {
@@ -849,20 +1040,20 @@ pub fn handle_placeholder_bursts(
                     rand::random_range(-0.5..0.5),
                 );
                 let pos = event.position + offset;
-                
+
                 let vel = Vec3::new(
                     rand::random_range(-0.5..0.5),
                     rand::random_range(-2.5..-1.0),
                     rand::random_range(-0.5..0.5),
                 );
-                
+
                 let chars = ['0', '1', '#', '@', '$', '%', '&', 'X', 'Y', '*'];
                 let char_idx = rand::random_range(0..chars.len());
                 let char_str = chars[char_idx].to_string();
-                
+
                 let font_size = rand::random_range(16.0..28.0);
                 let lifetime = rand::random_range(0.8..1.5);
-                
+
                 commands.spawn((
                     Text2d::new(char_str),
                     TextFont {
@@ -872,6 +1063,7 @@ pub fn handle_placeholder_bursts(
                     },
                     TextColor(Color::hsl(120.0, 0.95, 0.6)),
                     Transform::from_translation(pos).with_rotation(cam_rotation),
+                    Visibility::Hidden,
                     MatrixParticle {
                         velocity: vel,
                         lifetime: Timer::from_seconds(lifetime, TimerMode::Once),
@@ -892,20 +1084,20 @@ pub fn handle_placeholder_bursts(
                     rand::random_range(-0.8..0.8),
                 );
                 let pos = event.position + offset;
-                
+
                 let vel = Vec3::new(
                     rand::random_range(-0.8..0.8),
                     rand::random_range(-3.5..-1.5),
                     rand::random_range(-0.8..0.8),
                 );
-                
+
                 let chars = ['0', '1', '#', '@', '$', '%', '&', 'X', 'Y', '*'];
                 let char_idx = rand::random_range(0..chars.len());
                 let char_str = chars[char_idx].to_string();
-                
+
                 let font_size = rand::random_range(18.0..32.0);
                 let lifetime = rand::random_range(1.0..2.0);
-                
+
                 commands.spawn((
                     Text2d::new(char_str),
                     TextFont {
@@ -915,6 +1107,7 @@ pub fn handle_placeholder_bursts(
                     },
                     TextColor(Color::hsl(120.0, 0.95, 0.65)),
                     Transform::from_translation(pos).with_rotation(cam_rotation),
+                    Visibility::Hidden,
                     MatrixParticle {
                         velocity: vel,
                         lifetime: Timer::from_seconds(lifetime, TimerMode::Once),
