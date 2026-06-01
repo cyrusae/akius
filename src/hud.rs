@@ -152,7 +152,7 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 .with_children(|score_panel| {
                                     score_panel.spawn((
                                         ScoreText,
-                                        Text::new("MEM: 0x000000"),
+                                        Text::new("Score: 000000  HI: 000000"),
                                         TextFont {
                                             font: font_handle.clone(),
                                             font_size: 24.0,
@@ -413,7 +413,7 @@ fn update_score_hud(
         return;
     };
     let hi = high_score.map(|h| h.0).unwrap_or(0);
-    let new_text = format!("MEM: 0x{:06X}  HI: 0x{:06X}", score.total, hi);
+    let new_text = format!("Score: {:06}  HI: {:06}", score.total, hi);
     if text.0 != new_text {
         text.0 = new_text;
     }
@@ -573,7 +573,7 @@ fn spawn_game_over_screen(
             ));
 
             parent.spawn((
-                Text::new(format!("final.score = 0x{:06X}", score.total)),
+                Text::new(format!("final.score = {:06}", score.total)),
                 TextFont {
                     font: font_handle.clone(),
                     font_size: 32.0,
@@ -816,7 +816,7 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>, asset_server: Res
             ));
 
             parent.spawn((
-                Text::new(format!("final.score = 0x{:06X}", score.total)),
+                Text::new(format!("final.score = {:06}", score.total)),
                 TextFont {
                     font: font_handle.clone(),
                     font_size: 32.0,
