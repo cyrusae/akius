@@ -108,6 +108,7 @@ name = "akius"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_mesh",
  "bevy_rapier3d",
  "getrandom 0.3.4",
  "rand",

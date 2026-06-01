@@ -68,6 +68,8 @@ pub const LASER_LINE_SHADER_HANDLE: Handle<Shader> =
     bevy::asset::uuid_handle!("38294710-9283-7498-1273-918231273492");
 pub const RETICLE_SHADER_HANDLE: Handle<Shader> =
     bevy::asset::uuid_handle!("48294710-9283-7498-1273-918231273493");
+pub const SIDE_DECK_SHADER_HANDLE: Handle<Shader> =
+    bevy::asset::uuid_handle!("58294710-9283-7498-1273-918231273494");
 
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub struct SphereUniforms {
@@ -157,6 +159,40 @@ impl Material for ReticleMaterial {
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
     }
+
+    fn specialize(
+        _pipeline: &bevy::pbr::MaterialPipeline,
+        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+        _layout: &bevy_mesh::MeshVertexBufferLayoutRef,
+        _key: bevy::pbr::MaterialPipelineKey<Self>,
+    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+        if let Some(depth_stencil) = &mut descriptor.depth_stencil {
+            depth_stencil.depth_compare = bevy::render::render_resource::CompareFunction::Always;
+            depth_stencil.depth_write_enabled = false;
+        }
+        Ok(())
+    }
+}
+
+#[derive(ShaderType, Clone, Copy, Debug)]
+pub struct SideDeckUniforms {
+    pub color: LinearRgba,
+    pub time: f32,
+    pub _padding1: f32,
+    pub _padding2: f32,
+    pub _padding3: f32,
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct SideDeckMaterial {
+    #[uniform(0)]
+    pub uniforms: SideDeckUniforms,
+}
+
+impl Material for SideDeckMaterial {
+    fn fragment_shader() -> ShaderRef {
+        ShaderRef::Handle(SIDE_DECK_SHADER_HANDLE)
+    }
 }
 
 /// Tag on the targeting reticle quad entity.
@@ -172,10 +208,21 @@ pub struct RetroEffectsAsset {
 #[derive(Resource)]
 pub struct TierMaterials {
     pub normal: [Handle<SphereMaterial>; 9],
+    pub core: [Handle<StandardMaterial>; 9],
+}
+
+/// Pre-built mesh handles for each tier.
+#[derive(Resource)]
+pub struct TierMeshes {
+    pub outer: [Handle<Mesh>; 9],
+    pub core: [Handle<Mesh>; 9],
 }
 
 /// Build all 9 tier materials.
-fn build_tier_materials(materials: &mut Assets<SphereMaterial>) -> TierMaterials {
+fn build_tier_materials(
+    materials: &mut Assets<SphereMaterial>,
+    std_materials: &mut Assets<StandardMaterial>,
+) -> TierMaterials {
     let normal = std::array::from_fn(|i| {
         let color = TIER_COLORS[i];
         let base_color = LinearRgba::from(color) * 0.05;
@@ -187,7 +234,15 @@ fn build_tier_materials(materials: &mut Assets<SphereMaterial>) -> TierMaterials
             },
         })
     });
-    TierMaterials { normal }
+    let core = std::array::from_fn(|i| {
+        let color = TIER_COLORS[i];
+        std_materials.add(StandardMaterial {
+            base_color: color,
+            emissive: LinearRgba::from(color) * 2.0,
+            ..default()
+        })
+    });
+    TierMaterials { normal, core }
 }
 
 /// Return the correct material handle for a tier (1-indexed).
@@ -229,6 +284,13 @@ fn setup_visuals_shaders(mut shaders: ResMut<Assets<Shader>>) {
             "shaders/reticle.wgsl",
         ),
     );
+    let _ = shaders.insert(
+        &SIDE_DECK_SHADER_HANDLE,
+        Shader::from_wgsl(
+            include_str!("../assets/shaders/side_deck.wgsl"),
+            "shaders/side_deck.wgsl",
+        ),
+    );
 }
 
 pub struct VisualPlugin;
@@ -239,6 +301,7 @@ impl Plugin for VisualPlugin {
             .add_plugins(MaterialPlugin::<FloorMaterial>::default())
             .add_plugins(MaterialPlugin::<LaserMaterial>::default())
             .add_plugins(MaterialPlugin::<ReticleMaterial>::default())
+            .add_plugins(MaterialPlugin::<SideDeckMaterial>::default())
             .add_systems(PreStartup, setup_visuals_shaders)
             // Systems
             .add_systems(Startup, setup_visuals)
@@ -246,17 +309,18 @@ impl Plugin for VisualPlugin {
                 Update,
                 (
                     update_preview_material,
-                    update_preview_label,
+                    update_preview_label.after(crate::launcher::update_launcher_preview_visuals),
                     update_labels_screen_position,
                     handle_keyboard_toggles,
                     update_aim_guide_line,
-                    update_targeting_reticle,
+                    update_targeting_reticle.after(crate::launcher::update_launcher_preview_visuals),
                     animate_merged_spawns,
                     animate_fulfilling_spheres,
                     cleanup_orphaned_labels,
                     handle_placeholder_bursts,
                     update_matrix_particles,
                     update_sphere_effects,
+                    update_side_decks,
                 ),
             )
             .add_systems(
@@ -280,12 +344,35 @@ fn setup_visuals(
     mut floor_materials: ResMut<Assets<FloorMaterial>>,
     mut laser_materials: ResMut<Assets<LaserMaterial>>,
     mut reticle_materials: ResMut<Assets<ReticleMaterial>>,
+    mut side_deck_materials: ResMut<Assets<SideDeckMaterial>>,
     settings: Res<GameSettings>,
     asset_server: Res<AssetServer>,
 ) {
     // Build and store tier materials
-    let tier_mats = build_tier_materials(&mut sphere_materials);
+    let tier_mats = build_tier_materials(&mut sphere_materials, &mut materials);
     commands.insert_resource(tier_mats);
+
+    // Build and store tier meshes
+    let mut outer_meshes = Vec::new();
+    let mut core_meshes = Vec::new();
+    for tier in 1..=9 {
+        let radius = get_radius(tier);
+        outer_meshes.push(meshes.add(
+            bevy::math::primitives::Sphere::new(radius)
+                .mesh()
+                .uv(32, 18),
+        ));
+        core_meshes.push(meshes.add(
+            bevy::math::primitives::Sphere::new(radius * 0.65)
+                .mesh()
+                .uv(16, 8),
+        ));
+    }
+    let tier_meshes = TierMeshes {
+        outer: outer_meshes.try_into().unwrap(),
+        core: core_meshes.try_into().unwrap(),
+    };
+    commands.insert_resource(tier_meshes);
 
     // Store Retro font handle
     let font_handle = asset_server.load("fonts/ShareTechMono-Regular.ttf");
@@ -313,6 +400,33 @@ fn setup_visuals(
         MeshMaterial3d(floor_mat.clone()),
         Transform::from_xyz(0.0, -0.05, center_z),
         Collider::cuboid(settings.arena_width * 0.5, 0.05, depth * 0.5),
+    ));
+
+    // ---- Side Diagnostics Decks ----
+    let side_deck_mat = side_deck_materials.add(SideDeckMaterial {
+        uniforms: SideDeckUniforms {
+            color: LinearRgba::from(Color::hsl(120.0, 0.55, 0.32)), // Phosphor green
+            time: 0.0,
+            _padding1: 0.0,
+            _padding2: 0.0,
+            _padding3: 0.0,
+        },
+    });
+
+    // Spawn left side deck
+    commands.spawn((
+        Name::new("Side Deck Left"),
+        Mesh3d(meshes.add(Cuboid::new(8.0, 0.1, depth))),
+        MeshMaterial3d(side_deck_mat.clone()),
+        Transform::from_xyz(-half_w - 0.1 - 4.0, -0.05, center_z),
+    ));
+
+    // Spawn right side deck
+    commands.spawn((
+        Name::new("Side Deck Right"),
+        Mesh3d(meshes.add(Cuboid::new(8.0, 0.1, depth))),
+        MeshMaterial3d(side_deck_mat.clone()),
+        Transform::from_xyz(half_w + 0.1 + 4.0, -0.05, center_z),
     ));
 
     // ---- Left wall ----
@@ -441,25 +555,20 @@ fn on_sphere_added(
     trigger: On<Add, Sphere>,
     sphere_query: Query<&Sphere>,
     tier_mats: Option<Res<TierMaterials>>,
+    tier_meshes: Option<Res<TierMeshes>>,
     effects_asset: Option<Res<RetroEffectsAsset>>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut std_materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let entity = trigger.event_target();
     let Ok(sphere) = sphere_query.get(entity) else {
         return;
     };
-    let Some(tier_mats) = tier_mats else {
+    let (Some(tier_mats), Some(tier_meshes)) = (tier_mats, tier_meshes) else {
         return;
     };
-    let radius = get_radius(sphere.tier);
+    let idx = (sphere.tier as usize).saturating_sub(1).min(8);
     let mat = material_for_tier(sphere.tier, &tier_mats);
-    let mesh = meshes.add(
-        bevy::math::primitives::Sphere::new(radius)
-            .mesh()
-            .uv(32, 18),
-    );
+    let mesh = tier_meshes.outer[idx].clone();
 
     // Spawn 3D visual mesh child entity centered at parent, and add Visibility component on parent
     commands
@@ -475,17 +584,8 @@ fn on_sphere_added(
             ));
 
             // 2. Nested emissive core
-            let core_color = TIER_COLORS[(sphere.tier as usize).saturating_sub(1).min(8)];
-            let core_mesh = meshes.add(
-                bevy::math::primitives::Sphere::new(radius * 0.65)
-                    .mesh()
-                    .uv(16, 8),
-            );
-            let core_mat = std_materials.add(StandardMaterial {
-                base_color: core_color,
-                emissive: LinearRgba::from(core_color) * 2.0,
-                ..default()
-            });
+            let core_mesh = tier_meshes.core[idx].clone();
+            let core_mat = tier_mats.core[idx].clone();
             parent.spawn((
                 SphereCore,
                 Mesh3d(core_mesh),
@@ -529,7 +629,6 @@ fn update_preview_material(
     tier_mats: Option<Res<TierMaterials>>,
     mut preview_query: Query<&mut MeshMaterial3d<SphereMaterial>, With<LauncherPreview>>,
     mut preview_core_query: Query<&mut MeshMaterial3d<StandardMaterial>, With<PreviewCore>>,
-    mut std_materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let (Some(queue), Some(tier_mats)) = (queue, tier_mats) else {
         return;
@@ -541,12 +640,11 @@ fn update_preview_material(
     *mat_handle = MeshMaterial3d(material_for_tier(queue.current, &tier_mats));
 
     if let Some(mut core_mat_handle) = preview_core_query.iter_mut().next() {
-        let core_color = TIER_COLORS[(queue.current as usize).saturating_sub(1).min(8)];
-        *core_mat_handle = MeshMaterial3d(std_materials.add(StandardMaterial {
-            base_color: core_color,
-            emissive: LinearRgba::from(core_color) * 2.0,
-            ..default()
-        }));
+        let idx = (queue.current as usize).saturating_sub(1).min(8);
+        let core_mat = tier_mats.core[idx].clone();
+        if core_mat_handle.0 != core_mat {
+            core_mat_handle.0 = core_mat;
+        }
     }
 }
 
@@ -625,14 +723,9 @@ fn update_labels_screen_position(
             }
 
             // Project coordinates
-            if let Some(ndc) = camera.world_to_ndc(cam_transform, world_pos) {
-                if ndc.z < 0.0 || ndc.z > 1.0 {
-                    crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
-                    continue;
-                }
-                // NDC [-1,1] → screen pixels (origin at center for Camera2d)
-                let screen_x = ndc.x * win_w * 0.5;
-                let screen_y = ndc.y * win_h * 0.5;
+            if let Ok(viewport_pos) = camera.world_to_viewport(cam_transform, world_pos) {
+                let screen_x = viewport_pos.x - win_w * 0.5;
+                let screen_y = win_h * 0.5 - viewport_pos.y;
                 label_transform.translation.x = screen_x;
                 label_transform.translation.y = screen_y;
 
@@ -648,18 +741,16 @@ fn update_labels_screen_position(
 fn update_preview_label(
     queue: Option<Res<DispenserQueue>>,
     colorblind: Option<Res<ColorblindMode>>,
+    launcher_state: Res<LauncherState>,
+    settings: Res<GameSettings>,
     camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    preview_query: Query<(&Transform, &Visibility), With<LauncherPreview>>,
     mut label_query: Query<
         (&mut Text2d, &mut Transform, &mut Visibility),
-        (With<PreviewLabel>, Without<LauncherPreview>),
+        With<PreviewLabel>,
     >,
     window_query: Query<&Window>,
 ) {
     let (Some(queue), Some(colorblind)) = (queue, colorblind) else {
-        return;
-    };
-    let Ok((preview_transform, preview_visibility)) = preview_query.single() else {
         return;
     };
     let Ok((mut text, mut label_transform, mut visibility)) = label_query.single_mut() else {
@@ -673,8 +764,8 @@ fn update_preview_label(
     }
 
     // Toggle visibility based on colorblind mode AND the preview sphere's visibility
-    let is_preview_visible =
-        *preview_visibility == Visibility::Visible || *preview_visibility == Visibility::Inherited;
+    let elapsed = launcher_state.cooldown_timer.elapsed_secs();
+    let is_preview_visible = launcher_state.cooldown_timer.is_finished() || elapsed >= 0.4;
 
     if colorblind.0 && is_preview_visible {
         let Ok((camera, cam_transform)) = camera_3d_query.single() else {
@@ -686,18 +777,15 @@ fn update_preview_label(
         let win_w = window.width();
         let win_h = window.height();
 
-        let world_pos = preview_transform.translation;
-        if let Some(ndc) = camera.world_to_ndc(cam_transform, world_pos) {
-            if ndc.z < 0.0 || ndc.z > 1.0 {
-                crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
-            } else {
-                let screen_x = ndc.x * win_w * 0.5;
-                let screen_y = ndc.y * win_h * 0.5;
-                label_transform.translation.x = screen_x;
-                label_transform.translation.y = screen_y;
+        let radius = get_radius(queue.current);
+        let world_pos = Vec3::new(launcher_state.active_x, radius, settings.launcher_z);
+        if let Ok(viewport_pos) = camera.world_to_viewport(cam_transform, world_pos) {
+            let screen_x = viewport_pos.x - win_w * 0.5;
+            let screen_y = win_h * 0.5 - viewport_pos.y;
+            label_transform.translation.x = screen_x;
+            label_transform.translation.y = screen_y;
 
-                crate::utils::set_visibility(&mut visibility, Visibility::Visible);
-            }
+            crate::utils::set_visibility(&mut visibility, Visibility::Visible);
         } else {
             crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
         }
@@ -1117,3 +1205,13 @@ pub fn handle_placeholder_bursts(
         }
     }
 }
+
+fn update_side_decks(
+    time: Res<Time>,
+    mut side_deck_materials: ResMut<Assets<SideDeckMaterial>>,
+) {
+    for (_, mat) in side_deck_materials.iter_mut() {
+        mat.uniforms.time = time.elapsed_secs();
+    }
+}
+
