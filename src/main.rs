@@ -22,6 +22,9 @@ fn main() {
                         title: "akiuS".into(),
                         canvas: Some("#bevy-canvas".to_string()),
                         fit_canvas_to_parent: true,
+                        #[cfg(target_arch = "wasm32")]
+                        resolution: bevy::window::WindowResolution::default()
+                            .with_scale_factor_override(1.0),
                         ..default()
                     }),
                     ..default()
@@ -106,17 +109,6 @@ fn setup_camera_and_light(mut commands: Commands) {
             ..default()
         },
         Transform::from_xyz(0.0, 15.0, 18.0).looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::Y),
-    ));
-
-    // 2D overlay camera for screen-space colorblindness labels
-    commands.spawn((
-        Camera2d,
-        Camera {
-            clear_color: ClearColorConfig::None,
-            order: 1,
-            ..default()
-        },
-        bevy::camera::visibility::RenderLayers::layer(1),
     ));
 
     commands.spawn((

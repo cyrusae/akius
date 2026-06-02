@@ -68,8 +68,7 @@ pub const LASER_LINE_SHADER_HANDLE: Handle<Shader> =
     bevy::asset::uuid_handle!("38294710-9283-7498-1273-918231273492");
 pub const RETICLE_SHADER_HANDLE: Handle<Shader> =
     bevy::asset::uuid_handle!("48294710-9283-7498-1273-918231273493");
-pub const SIDE_DECK_SHADER_HANDLE: Handle<Shader> =
-    bevy::asset::uuid_handle!("58294710-9283-7498-1273-918231273494");
+
 
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub struct SphereUniforms {
@@ -174,26 +173,6 @@ impl Material for ReticleMaterial {
     }
 }
 
-#[derive(ShaderType, Clone, Copy, Debug)]
-pub struct SideDeckUniforms {
-    pub color: LinearRgba,
-    pub time: f32,
-    pub _padding1: f32,
-    pub _padding2: f32,
-    pub _padding3: f32,
-}
-
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-pub struct SideDeckMaterial {
-    #[uniform(0)]
-    pub uniforms: SideDeckUniforms,
-}
-
-impl Material for SideDeckMaterial {
-    fn fragment_shader() -> ShaderRef {
-        ShaderRef::Handle(SIDE_DECK_SHADER_HANDLE)
-    }
-}
 
 /// Tag on the targeting reticle quad entity.
 #[derive(Component)]
@@ -284,13 +263,7 @@ fn setup_visuals_shaders(mut shaders: ResMut<Assets<Shader>>) {
             "shaders/reticle.wgsl",
         ),
     );
-    let _ = shaders.insert(
-        &SIDE_DECK_SHADER_HANDLE,
-        Shader::from_wgsl(
-            include_str!("../assets/shaders/side_deck.wgsl"),
-            "shaders/side_deck.wgsl",
-        ),
-    );
+
 }
 
 pub struct VisualPlugin;
@@ -301,7 +274,6 @@ impl Plugin for VisualPlugin {
             .add_plugins(MaterialPlugin::<FloorMaterial>::default())
             .add_plugins(MaterialPlugin::<LaserMaterial>::default())
             .add_plugins(MaterialPlugin::<ReticleMaterial>::default())
-            .add_plugins(MaterialPlugin::<SideDeckMaterial>::default())
             .add_systems(PreStartup, setup_visuals_shaders)
             // Systems
             .add_systems(Startup, setup_visuals)
@@ -310,7 +282,7 @@ impl Plugin for VisualPlugin {
                 (
                     update_preview_material,
                     update_preview_label.after(crate::launcher::update_launcher_preview_visuals),
-                    update_labels_screen_position,
+                    update_labels_3d_position,
                     handle_keyboard_toggles,
                     update_aim_guide_line,
                     update_targeting_reticle.after(crate::launcher::update_launcher_preview_visuals),
@@ -320,7 +292,6 @@ impl Plugin for VisualPlugin {
                     handle_placeholder_bursts,
                     update_matrix_particles,
                     update_sphere_effects,
-                    update_side_decks,
                 ),
             )
             .add_systems(
@@ -344,7 +315,6 @@ fn setup_visuals(
     mut floor_materials: ResMut<Assets<FloorMaterial>>,
     mut laser_materials: ResMut<Assets<LaserMaterial>>,
     mut reticle_materials: ResMut<Assets<ReticleMaterial>>,
-    mut side_deck_materials: ResMut<Assets<SideDeckMaterial>>,
     settings: Res<GameSettings>,
     asset_server: Res<AssetServer>,
 ) {
@@ -403,30 +373,20 @@ fn setup_visuals(
     ));
 
     // ---- Side Diagnostics Decks ----
-    let side_deck_mat = side_deck_materials.add(SideDeckMaterial {
-        uniforms: SideDeckUniforms {
-            color: LinearRgba::from(Color::hsl(120.0, 0.55, 0.32)), // Phosphor green
-            time: 0.0,
-            _padding1: 0.0,
-            _padding2: 0.0,
-            _padding3: 0.0,
-        },
-    });
-
-    // Spawn left side deck
+    // Spawn left side deck (raised to connect flush with the top of the left wall)
     commands.spawn((
         Name::new("Side Deck Left"),
         Mesh3d(meshes.add(Cuboid::new(8.0, 0.1, depth))),
-        MeshMaterial3d(side_deck_mat.clone()),
-        Transform::from_xyz(-half_w - 0.1 - 4.0, -0.05, center_z),
+        MeshMaterial3d(floor_mat.clone()),
+        Transform::from_xyz(-half_w - 0.1 - 4.0, wh - 0.05, center_z),
     ));
 
-    // Spawn right side deck
+    // Spawn right side deck (raised to connect flush with the top of the right wall)
     commands.spawn((
         Name::new("Side Deck Right"),
         Mesh3d(meshes.add(Cuboid::new(8.0, 0.1, depth))),
-        MeshMaterial3d(side_deck_mat.clone()),
-        Transform::from_xyz(half_w + 0.1 + 4.0, -0.05, center_z),
+        MeshMaterial3d(floor_mat.clone()),
+        Transform::from_xyz(half_w + 0.1 + 4.0, wh - 0.05, center_z),
     ));
 
     // ---- Left wall ----
@@ -530,6 +490,7 @@ fn setup_visuals(
     commands.entity(preview_entity).add_child(core_entity);
 
     // ---- Preview label ----
+    let init_radius = get_radius(1);
     commands.spawn((
         PreviewLabel,
         Text2d::new("1"),
@@ -541,9 +502,9 @@ fn setup_visuals(
         TextColor(Color::WHITE),
         TextLayout::new_with_justify(Justify::Center),
         bevy::text::LineHeight::Px(22.0),
-        Transform::from_xyz(0.0, 0.0, 10.0),
+        Transform::from_xyz(0.0, init_radius + 0.35, settings.launcher_z + 0.15)
+            .with_scale(Vec3::splat(0.015)),
         Visibility::Hidden,
-        bevy::camera::visibility::RenderLayers::layer(1),
     ));
 }
 
@@ -594,16 +555,15 @@ fn on_sphere_added(
             ));
         });
 
-    // Spawn a root-level 2D text label that will be screen-projected on top of 3D
+    // Spawn a root-level 3D text label that will follow the sphere in 3D space
     let mut label_cmd = commands.spawn((
         BillboardLabel(entity),
         Text2d::new(sphere.tier.to_string()),
         TextColor(Color::WHITE),
         TextLayout::new_with_justify(Justify::Center),
         bevy::text::LineHeight::Px(22.0),
-        Transform::from_xyz(0.0, 0.0, 10.0), // Z coordinate in 2D space
+        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(0.015)),
         Visibility::Hidden,
-        bevy::camera::visibility::RenderLayers::layer(1),
     ));
 
     if let Some(ref asset) = effects_asset {
@@ -648,13 +608,12 @@ fn update_preview_material(
     }
 }
 
-// Project each label's tracked sphere from 3D world space to 2D screen space.
-fn update_labels_screen_position(
+// Position each active label in 3D space above the sphere surface facing the camera.
+fn update_labels_3d_position(
     colorblind: Res<ColorblindMode>,
     sphere_query: Query<(Entity, &Transform, &Sphere)>,
     mut label_query: Query<(&BillboardLabel, &mut Transform, &mut Visibility), Without<Sphere>>,
-    camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    window_query: Query<&Window>,
+    camera_3d_query: Query<&GlobalTransform, With<Camera3d>>,
 ) {
     if !colorblind.0 {
         // If colorblind mode is OFF, hide all labels and exit
@@ -664,24 +623,14 @@ fn update_labels_screen_position(
         return;
     }
 
-    let Ok((camera, cam_transform)) = camera_3d_query.single() else {
+    let Ok(cam_transform) = camera_3d_query.single() else {
         return;
     };
-    let Ok(window) = window_query.single() else {
-        return;
-    };
-    let win_w = window.width();
-    let win_h = window.height();
     let cam_pos = cam_transform.translation();
-
-    // Cache active sphere transforms and computed radii to avoid ECS query overhead in inner loop
-    let spheres: Vec<(Entity, Vec3, f32)> = sphere_query
-        .iter()
-        .map(|(e, t, s)| (e, t.translation, get_radius(s.tier)))
-        .collect();
+    let cam_rotation = cam_transform.compute_transform().rotation;
 
     for (label, mut label_transform, mut visibility) in label_query.iter_mut() {
-        if let Ok((sphere_entity, sphere_transform, sphere)) = sphere_query.get(label.0) {
+        if let Ok((_, sphere_transform, sphere)) = sphere_query.get(label.0) {
             let sphere_pos = sphere_transform.translation;
             if sphere_pos.y < -0.1 {
                 crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
@@ -689,66 +638,30 @@ fn update_labels_screen_position(
             }
             let radius = get_radius(sphere.tier);
 
-            // Project a point at the visual center of the sphere in world space
-            let world_pos = sphere_pos;
+            // Compute direction to camera to project the label directly on the sphere's surface facing the camera
+            let dir_to_cam = (cam_pos - sphere_pos).normalize();
+            label_transform.translation = sphere_pos + dir_to_cam * (radius + 0.03);
+            label_transform.rotation = cam_rotation;
+            label_transform.scale = Vec3::splat(0.015);
 
-            // Analytical ray-sphere occlusion check: is the visual sphere occluded from the camera's perspective?
-            let mut occluded = false;
-            let to_target = world_pos - cam_pos;
-            let target_dist = to_target.length();
-            if target_dist > 0.0 {
-                let ray_dir = to_target / target_dist;
-
-                for &(other_entity, other_visual_center, other_radius) in &spheres {
-                    if other_entity == sphere_entity {
-                        continue;
-                    }
-                    let v = other_visual_center - cam_pos;
-                    let t = v.dot(ray_dir);
-                    // Only check spheres that lie between the camera and our target sphere (with a small buffer)
-                    if t > 0.0 && t < target_dist - radius * 0.1 {
-                        let d2 = v.length_squared() - t * t;
-                        let r2 = other_radius * other_radius;
-                        if d2 < r2 {
-                            occluded = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if occluded {
-                crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
-                continue;
-            }
-
-            // Project coordinates
-            if let Ok(viewport_pos) = camera.world_to_viewport(cam_transform, world_pos) {
-                let screen_x = viewport_pos.x - win_w * 0.5;
-                let screen_y = win_h * 0.5 - viewport_pos.y;
-                label_transform.translation.x = screen_x;
-                label_transform.translation.y = screen_y;
-
-                crate::utils::set_visibility(&mut visibility, Visibility::Visible);
-            } else {
-                crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
-            }
+            crate::utils::set_visibility(&mut visibility, Visibility::Inherited);
+        } else {
+            crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
         }
     }
 }
 
-// Track and project the launcher preview label onto the launcher preview sphere.
+// Track and position the launcher preview label in 3D space above the launcher preview sphere facing the camera.
 fn update_preview_label(
     queue: Option<Res<DispenserQueue>>,
     colorblind: Option<Res<ColorblindMode>>,
     launcher_state: Res<LauncherState>,
     settings: Res<GameSettings>,
-    camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    camera_3d_query: Query<&GlobalTransform, With<Camera3d>>,
     mut label_query: Query<
         (&mut Text2d, &mut Transform, &mut Visibility),
         With<PreviewLabel>,
     >,
-    window_query: Query<&Window>,
 ) {
     let (Some(queue), Some(colorblind)) = (queue, colorblind) else {
         return;
@@ -768,27 +681,22 @@ fn update_preview_label(
     let is_preview_visible = launcher_state.cooldown_timer.is_finished() || elapsed >= 0.4;
 
     if colorblind.0 && is_preview_visible {
-        let Ok((camera, cam_transform)) = camera_3d_query.single() else {
+        let Ok(cam_transform) = camera_3d_query.single() else {
             return;
         };
-        let Ok(window) = window_query.single() else {
-            return;
-        };
-        let win_w = window.width();
-        let win_h = window.height();
+        let cam_pos = cam_transform.translation();
+        let cam_rotation = cam_transform.compute_transform().rotation;
 
         let radius = get_radius(queue.current);
         let world_pos = Vec3::new(launcher_state.active_x, radius, settings.launcher_z);
-        if let Ok(viewport_pos) = camera.world_to_viewport(cam_transform, world_pos) {
-            let screen_x = viewport_pos.x - win_w * 0.5;
-            let screen_y = win_h * 0.5 - viewport_pos.y;
-            label_transform.translation.x = screen_x;
-            label_transform.translation.y = screen_y;
 
-            crate::utils::set_visibility(&mut visibility, Visibility::Visible);
-        } else {
-            crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
-        }
+        // Position directly on the surface facing the camera
+        let dir_to_cam = (cam_pos - world_pos).normalize();
+        label_transform.translation = world_pos + dir_to_cam * (radius + 0.03);
+        label_transform.rotation = cam_rotation;
+        label_transform.scale = Vec3::splat(0.015);
+
+        crate::utils::set_visibility(&mut visibility, Visibility::Inherited);
     } else {
         crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
     }
@@ -1120,6 +1028,9 @@ pub fn handle_placeholder_bursts(
     // Read merge events
     for event in merge_events.read() {
         if is_effects_on {
+            #[cfg(target_arch = "wasm32")]
+            let num_particles = (5 + (event.tier as usize)).min(15);
+            #[cfg(not(target_arch = "wasm32"))]
             let num_particles = 10 + (event.tier as usize) * 2;
             for _ in 0..num_particles {
                 let offset = Vec3::new(
@@ -1164,6 +1075,9 @@ pub fn handle_placeholder_bursts(
     // Read fulfillment events
     for event in fulfill_events.read() {
         if is_effects_on {
+            #[cfg(target_arch = "wasm32")]
+            let num_particles = (12 + (event.tier as usize) * 2).min(25);
+            #[cfg(not(target_arch = "wasm32"))]
             let num_particles = 25 + (event.tier as usize) * 3;
             for _ in 0..num_particles {
                 let offset = Vec3::new(
@@ -1203,15 +1117,6 @@ pub fn handle_placeholder_bursts(
                 ));
             }
         }
-    }
-}
-
-fn update_side_decks(
-    time: Res<Time>,
-    mut side_deck_materials: ResMut<Assets<SideDeckMaterial>>,
-) {
-    for (_, mat) in side_deck_materials.iter_mut() {
-        mat.uniforms.time = time.elapsed_secs();
     }
 }
 
