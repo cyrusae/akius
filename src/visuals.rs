@@ -282,7 +282,7 @@ impl Plugin for VisualPlugin {
                 (
                     update_preview_material,
                     update_preview_label.after(crate::launcher::update_launcher_preview_visuals),
-                    update_labels_3d_position,
+                    update_labels_screen_position,
                     handle_keyboard_toggles,
                     update_aim_guide_line,
                     update_targeting_reticle.after(crate::launcher::update_launcher_preview_visuals),
@@ -490,20 +490,19 @@ fn setup_visuals(
     commands.entity(preview_entity).add_child(core_entity);
 
     // ---- Preview label ----
-    let init_radius = get_radius(1);
     commands.spawn((
         PreviewLabel,
-        Text2d::new("1"),
+        Text::new("1"),
         TextFont {
             font: font_handle.clone(),
             font_size: 22.0,
             ..default()
         },
         TextColor(Color::WHITE),
-        TextLayout::new_with_justify(Justify::Center),
-        bevy::text::LineHeight::Px(22.0),
-        Transform::from_xyz(0.0, init_radius + 0.35, settings.launcher_z + 0.15)
-            .with_scale(Vec3::splat(0.015)),
+        Node {
+            position_type: PositionType::Absolute,
+            ..default()
+        },
         Visibility::Hidden,
     ));
 }
@@ -555,14 +554,15 @@ fn on_sphere_added(
             ));
         });
 
-    // Spawn a root-level 3D text label that will follow the sphere in 3D space
+    // Spawn a root-level UI text label that will be screen-projected on top of 3D
     let mut label_cmd = commands.spawn((
         BillboardLabel(entity),
-        Text2d::new(sphere.tier.to_string()),
+        Text::new(sphere.tier.to_string()),
         TextColor(Color::WHITE),
-        TextLayout::new_with_justify(Justify::Center),
-        bevy::text::LineHeight::Px(22.0),
-        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(0.015)),
+        Node {
+            position_type: PositionType::Absolute,
+            ..default()
+        },
         Visibility::Hidden,
     ));
 
@@ -608,12 +608,14 @@ fn update_preview_material(
     }
 }
 
-// Position each active label in 3D space above the sphere surface facing the camera.
-fn update_labels_3d_position(
+// Position each active label in 2D screen space above its tracked 3D sphere, applying CRT barrel distortion if active.
+fn update_labels_screen_position(
     colorblind: Res<ColorblindMode>,
+    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
     sphere_query: Query<(Entity, &Transform, &Sphere)>,
-    mut label_query: Query<(&BillboardLabel, &mut Transform, &mut Visibility), Without<Sphere>>,
-    camera_3d_query: Query<&GlobalTransform, With<Camera3d>>,
+    mut label_query: Query<(&BillboardLabel, &mut Node, &mut Visibility), Without<Sphere>>,
+    camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: Query<&Window>,
 ) {
     if !colorblind.0 {
         // If colorblind mode is OFF, hide all labels and exit
@@ -623,50 +625,76 @@ fn update_labels_3d_position(
         return;
     }
 
-    let Ok(cam_transform) = camera_3d_query.single() else {
+    let Ok((camera, cam_transform)) = camera_3d_query.single() else {
         return;
     };
-    let cam_pos = cam_transform.translation();
-    let cam_rotation = cam_transform.compute_transform().rotation;
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+    let win_w = window.width();
+    let win_h = window.height();
+    let is_effects_on = effects_mode
+        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .unwrap_or(true);
 
-    for (label, mut label_transform, mut visibility) in label_query.iter_mut() {
-        if let Ok((_, sphere_transform, sphere)) = sphere_query.get(label.0) {
+    for (label, mut node, mut visibility) in label_query.iter_mut() {
+        if let Ok((_, sphere_transform, _)) = sphere_query.get(label.0) {
             let sphere_pos = sphere_transform.translation;
             if sphere_pos.y < -0.1 {
                 crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
                 continue;
             }
-            let radius = get_radius(sphere.tier);
 
-            // Compute direction to camera to project the label directly on the sphere's surface facing the camera
-            let dir_to_cam = (cam_pos - sphere_pos).normalize();
-            label_transform.translation = sphere_pos + dir_to_cam * (radius + 0.03);
-            label_transform.rotation = cam_rotation;
-            label_transform.scale = Vec3::splat(0.015);
+            // Project coordinates
+            if let Ok(viewport_pos) = camera.world_to_viewport(cam_transform, sphere_pos) {
+                let mut x = viewport_pos.x;
+                let mut y = viewport_pos.y;
 
-            crate::utils::set_visibility(&mut visibility, Visibility::Inherited);
+                if is_effects_on {
+                    // Apply the exact same barrel distortion curve as the CRT post-process shader
+                    let uv = Vec2::new(viewport_pos.x / win_w, viewport_pos.y / win_h);
+                    let mut u = uv - Vec2::new(0.5, 0.5);
+                    let bend = Vec2::new(3.8, 3.8);
+                    u.x *= 1.0 + (u.y * u.y) / bend.x;
+                    u.y *= 1.0 + (u.x * u.x) / bend.y;
+                    let uv_distorted = u + Vec2::new(0.5, 0.5);
+                    x = uv_distorted.x * win_w;
+                    y = uv_distorted.y * win_h;
+                }
+
+                // Center UI text node (font size 22.0, single digit is approx 13x22px)
+                node.position_type = PositionType::Absolute;
+                node.left = Val::Px(x - 6.5);
+                node.top = Val::Px(y - 11.0);
+
+                crate::utils::set_visibility(&mut visibility, Visibility::Visible);
+            } else {
+                crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
+            }
         } else {
             crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
         }
     }
 }
 
-// Track and position the launcher preview label in 3D space above the launcher preview sphere facing the camera.
+// Track and position the launcher preview label in 2D screen space, applying CRT barrel distortion if active.
 fn update_preview_label(
     queue: Option<Res<DispenserQueue>>,
     colorblind: Option<Res<ColorblindMode>>,
+    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
     launcher_state: Res<LauncherState>,
     settings: Res<GameSettings>,
-    camera_3d_query: Query<&GlobalTransform, With<Camera3d>>,
+    camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut label_query: Query<
-        (&mut Text2d, &mut Transform, &mut Visibility),
+        (&mut Text, &mut Node, &mut Visibility),
         With<PreviewLabel>,
     >,
+    window_query: Query<&Window>,
 ) {
     let (Some(queue), Some(colorblind)) = (queue, colorblind) else {
         return;
     };
-    let Ok((mut text, mut label_transform, mut visibility)) = label_query.single_mut() else {
+    let Ok((mut text, mut node, mut visibility)) = label_query.single_mut() else {
         return;
     };
 
@@ -681,22 +709,45 @@ fn update_preview_label(
     let is_preview_visible = launcher_state.cooldown_timer.is_finished() || elapsed >= 0.4;
 
     if colorblind.0 && is_preview_visible {
-        let Ok(cam_transform) = camera_3d_query.single() else {
+        let Ok((camera, cam_transform)) = camera_3d_query.single() else {
             return;
         };
-        let cam_pos = cam_transform.translation();
-        let cam_rotation = cam_transform.compute_transform().rotation;
+        let Ok(window) = window_query.single() else {
+            return;
+        };
+        let win_w = window.width();
+        let win_h = window.height();
+        let is_effects_on = effects_mode
+            .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+            .unwrap_or(true);
 
         let radius = get_radius(queue.current);
         let world_pos = Vec3::new(launcher_state.active_x, radius, settings.launcher_z);
 
-        // Position directly on the surface facing the camera
-        let dir_to_cam = (cam_pos - world_pos).normalize();
-        label_transform.translation = world_pos + dir_to_cam * (radius + 0.03);
-        label_transform.rotation = cam_rotation;
-        label_transform.scale = Vec3::splat(0.015);
+        if let Ok(viewport_pos) = camera.world_to_viewport(cam_transform, world_pos) {
+            let mut x = viewport_pos.x;
+            let mut y = viewport_pos.y;
 
-        crate::utils::set_visibility(&mut visibility, Visibility::Inherited);
+            if is_effects_on {
+                // Apply the exact same barrel distortion curve as the CRT post-process shader
+                let uv = Vec2::new(viewport_pos.x / win_w, viewport_pos.y / win_h);
+                let mut u = uv - Vec2::new(0.5, 0.5);
+                let bend = Vec2::new(3.8, 3.8);
+                u.x *= 1.0 + (u.y * u.y) / bend.x;
+                u.y *= 1.0 + (u.x * u.x) / bend.y;
+                let uv_distorted = u + Vec2::new(0.5, 0.5);
+                x = uv_distorted.x * win_w;
+                y = uv_distorted.y * win_h;
+            }
+
+            node.position_type = PositionType::Absolute;
+            node.left = Val::Px(x - 6.5);
+            node.top = Val::Px(y - 11.0);
+
+            crate::utils::set_visibility(&mut visibility, Visibility::Visible);
+        } else {
+            crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
+        }
     } else {
         crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
     }
@@ -966,11 +1017,11 @@ fn update_matrix_particles(
         Entity,
         &mut Transform,
         &mut MatrixParticle,
-        &mut TextColor,
+        &mut Sprite,
         &mut Visibility,
     )>,
 ) {
-    for (entity, mut transform, mut particle, mut text_color, mut visibility) in
+    for (entity, mut transform, mut particle, mut sprite, mut visibility) in
         particle_query.iter_mut()
     {
         particle.lifetime.tick(time.delta());
@@ -988,11 +1039,11 @@ fn update_matrix_particles(
             let t = particle.lifetime.fraction();
             let alpha = (1.0 - t).clamp(0.0, 1.0);
 
-            if let Color::LinearRgba(ref mut rgba) = text_color.0 {
+            if let Color::LinearRgba(ref mut rgba) = sprite.color {
                 *rgba = LinearRgba::new(rgba.red, rgba.green, rgba.blue, alpha);
             } else {
-                let to_rgba = text_color.0.to_linear();
-                text_color.0 = Color::LinearRgba(LinearRgba::new(
+                let to_rgba = sprite.color.to_linear();
+                sprite.color = Color::LinearRgba(LinearRgba::new(
                     to_rgba.red,
                     to_rgba.green,
                     to_rgba.blue,
@@ -1006,7 +1057,6 @@ fn update_matrix_particles(
 pub fn handle_placeholder_bursts(
     mut commands: Commands,
     effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
-    effects_asset: Option<Res<RetroEffectsAsset>>,
     mut merge_events: MessageReader<crate::game_state::MergeBurstEvent>,
     mut fulfill_events: MessageReader<crate::game_state::FulfillmentBurstEvent>,
     camera_query: Query<&GlobalTransform, With<Camera3d>>,
@@ -1014,10 +1064,6 @@ pub fn handle_placeholder_bursts(
     let is_effects_on = effects_mode
         .map(|m| *m == crate::game_state::VisualEffectsMode::On)
         .unwrap_or(true);
-
-    let Some(effects_asset) = effects_asset else {
-        return;
-    };
 
     let cam_rotation = camera_query
         .iter()
@@ -1046,21 +1092,16 @@ pub fn handle_placeholder_bursts(
                     rand::random_range(-0.5..0.5),
                 );
 
-                let chars = ['0', '1', '#', '@', '$', '%', '&', 'X', 'Y', '*'];
-                let char_idx = rand::random_range(0..chars.len());
-                let char_str = chars[char_idx].to_string();
-
-                let font_size = rand::random_range(16.0..28.0);
+                let width = rand::random_range(0.03..0.06);
+                let height = rand::random_range(0.12..0.22);
                 let lifetime = rand::random_range(0.8..1.5);
 
                 commands.spawn((
-                    Text2d::new(char_str),
-                    TextFont {
-                        font: effects_asset.font.clone(),
-                        font_size,
+                    Sprite {
+                        color: Color::hsl(120.0, 0.95, 0.6),
+                        custom_size: Some(Vec2::new(width, height)),
                         ..default()
                     },
-                    TextColor(Color::hsl(120.0, 0.95, 0.6)),
                     Transform::from_translation(pos).with_rotation(cam_rotation),
                     Visibility::Hidden,
                     MatrixParticle {
@@ -1093,21 +1134,16 @@ pub fn handle_placeholder_bursts(
                     rand::random_range(-0.8..0.8),
                 );
 
-                let chars = ['0', '1', '#', '@', '$', '%', '&', 'X', 'Y', '*'];
-                let char_idx = rand::random_range(0..chars.len());
-                let char_str = chars[char_idx].to_string();
-
-                let font_size = rand::random_range(18.0..32.0);
+                let width = rand::random_range(0.04..0.08);
+                let height = rand::random_range(0.15..0.28);
                 let lifetime = rand::random_range(1.0..2.0);
 
                 commands.spawn((
-                    Text2d::new(char_str),
-                    TextFont {
-                        font: effects_asset.font.clone(),
-                        font_size,
+                    Sprite {
+                        color: Color::hsl(120.0, 0.95, 0.65),
+                        custom_size: Some(Vec2::new(width, height)),
                         ..default()
                     },
-                    TextColor(Color::hsl(120.0, 0.95, 0.65)),
                     Transform::from_translation(pos).with_rotation(cam_rotation),
                     Visibility::Hidden,
                     MatrixParticle {
@@ -1119,4 +1155,74 @@ pub fn handle_placeholder_bursts(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_label_projection() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+        ));
+        app.insert_resource(GameSettings::default());
+        app.insert_resource(ColorblindMode(true));
+        app.insert_resource(LauncherState::default());
+        app.insert_resource(DispenserQueue {
+            current: 1,
+            next: 2,
+        });
+
+        // Spawn 3D camera
+        let cam_transform = Transform::from_xyz(0.0, 15.0, 18.0).looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::Y);
+        app.world_mut().spawn((
+            Camera3d::default(),
+            Camera {
+                viewport: Some(bevy::camera::Viewport {
+                    physical_position: UVec2::ZERO,
+                    physical_size: UVec2::new(800, 600),
+                    ..default()
+                }),
+                ..default()
+            },
+            cam_transform,
+            GlobalTransform::from(cam_transform),
+        ));
+
+        // Spawn Window
+        app.world_mut().spawn(Window {
+            resolution: bevy::window::WindowResolution::new(800, 600),
+            ..default()
+        });
+
+        // Spawn preview label as a UI node
+        let preview_label_entity = app.world_mut().spawn((
+            PreviewLabel,
+            Text::new("1"),
+            TextFont::default(),
+            TextColor(Color::WHITE),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            Visibility::Hidden,
+        )).id();
+
+        // Run systems: update_preview_label
+        app.add_systems(Update, update_preview_label);
+
+        // Run once
+        app.update();
+
+        // Check the label UI node properties
+        let label_node = app.world().entity(preview_label_entity).get::<Node>().unwrap();
+        let label_vis = app.world().entity(preview_label_entity).get::<Visibility>().unwrap();
+
+        assert!(matches!(label_node.position_type, PositionType::Absolute));
+        assert_eq!(*label_vis, Visibility::Hidden);
+    }
+}
+
 

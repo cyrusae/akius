@@ -12,6 +12,7 @@ pub struct LauncherState {
     pub obstructed: bool,
     pub cooldown_timer: Timer,
     pub last_cursor_position: Option<Vec2>,
+    pub active_touch_ids: Vec<u64>,
 }
 
 impl Default for LauncherState {
@@ -24,6 +25,7 @@ impl Default for LauncherState {
             obstructed: false,
             cooldown_timer,
             last_cursor_position: None,
+            active_touch_ids: Vec::new(),
         }
     }
 }
@@ -262,8 +264,25 @@ pub fn handle_launch_input(
     let over_ui = interaction_query.iter().any(|&i| i != Interaction::None);
     let is_touch_active = touches.iter().next().is_some() || touches.any_just_released();
 
+    // Track touch lifecycle inside InGame
+    for touch in touches.iter_just_pressed() {
+        if !launcher_state.active_touch_ids.contains(&touch.id()) {
+            launcher_state.active_touch_ids.push(touch.id());
+        }
+    }
+
+    let mut touch_fired = false;
+    for touch in touches.iter_just_released() {
+        if let Some(pos) = launcher_state.active_touch_ids.iter().position(|&id| id == touch.id()) {
+            touch_fired = true;
+            launcher_state.active_touch_ids.swap_remove(pos);
+        }
+    }
+
+    launcher_state.active_touch_ids.retain(|&id| touches.get_pressed(id).is_some());
+
     let fire_pressed = if is_touch_active {
-        touches.any_just_released() && !over_ui
+        touch_fired && !over_ui
     } else {
         (mouse_button_input.just_pressed(MouseButton::Left) && !over_ui)
             || keyboard_input.just_pressed(KeyCode::Space)
@@ -532,6 +551,87 @@ mod tests {
                 .resource::<crate::game_state::DispenserQueue>()
                 .current,
             1
+        );
+    }
+
+    #[test]
+    fn test_touch_start_origin_filter() {
+        use bevy::input::touch::{TouchInput, TouchPhase};
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::input::InputPlugin);
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<crate::game_state::AppState>();
+        app.insert_resource(GameSettings::default());
+        app.insert_resource(LauncherState::default());
+        app.insert_resource(crate::game_state::DispenserQueue {
+            current: 1,
+            next: 2,
+        });
+        app.insert_resource(ButtonInput::<MouseButton>::default());
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(Time::<()>::default());
+
+        app.add_systems(
+            Update,
+            handle_launch_input.run_if(in_state(crate::game_state::AppState::InGame)),
+        );
+
+        // Case 1: Touch started before InGame (e.g. in MainMenu)
+        app.world_mut().resource_mut::<Messages<TouchInput>>().write(TouchInput {
+            id: 42,
+            phase: TouchPhase::Started,
+            position: Vec2::new(100.0, 100.0),
+            force: None,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+
+        // Transition to InGame
+        app.world_mut()
+            .resource_mut::<NextState<crate::game_state::AppState>>()
+            .set(crate::game_state::AppState::InGame);
+        app.update(); // Apply state transition
+
+        // Release the touch that started in MainMenu
+        app.world_mut().resource_mut::<Messages<TouchInput>>().write(TouchInput {
+            id: 42,
+            phase: TouchPhase::Ended,
+            position: Vec2::new(100.0, 100.0),
+            force: None,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+
+        // Verify that the sphere did NOT launch (current remains 1)
+        assert_eq!(
+            app.world().resource::<crate::game_state::DispenserQueue>().current,
+            1
+        );
+
+        // Case 2: Touch starts inside InGame
+        app.world_mut().resource_mut::<Messages<TouchInput>>().write(TouchInput {
+            id: 43,
+            phase: TouchPhase::Started,
+            position: Vec2::new(100.0, 100.0),
+            force: None,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+
+        app.world_mut().resource_mut::<Messages<TouchInput>>().write(TouchInput {
+            id: 43,
+            phase: TouchPhase::Ended,
+            position: Vec2::new(100.0, 100.0),
+            force: None,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+
+        // Verify that the sphere DID launch (current becomes 2)
+        assert_eq!(
+            app.world().resource::<crate::game_state::DispenserQueue>().current,
+            2
         );
     }
 }
