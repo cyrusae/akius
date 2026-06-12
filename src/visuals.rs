@@ -87,7 +87,6 @@ pub const LASER_LINE_SHADER_HANDLE: Handle<Shader> =
 pub const RETICLE_SHADER_HANDLE: Handle<Shader> =
     bevy::asset::uuid_handle!("48294710-9283-7498-1273-918231273493");
 
-
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub struct SphereUniforms {
     pub color: LinearRgba,
@@ -183,7 +182,6 @@ impl Material for ReticleMaterial {
     }
 }
 
-
 /// Tag on the targeting reticle quad entity.
 #[derive(Component)]
 pub struct TargetingReticle;
@@ -272,7 +270,6 @@ fn setup_visuals_shaders(mut shaders: ResMut<Assets<Shader>>) {
             "shaders/reticle.wgsl",
         ),
     );
-
 }
 
 pub struct VisualPlugin;
@@ -294,7 +291,8 @@ impl Plugin for VisualPlugin {
                     update_labels_screen_position,
                     handle_keyboard_toggles,
                     update_aim_guide_line,
-                    update_targeting_reticle.after(crate::launcher::update_launcher_preview_visuals),
+                    update_targeting_reticle
+                        .after(crate::launcher::update_launcher_preview_visuals),
                     animate_merged_spawns,
                     animate_fulfilling_spheres,
                     cleanup_orphaned_labels,
@@ -336,16 +334,20 @@ fn setup_visuals(
     let mut core_meshes = Vec::new();
     for tier in 1..=9 {
         let radius = get_radius(tier);
-        outer_meshes.push(meshes.add(
-            bevy::math::primitives::Sphere::new(radius)
-                .mesh()
-                .uv(32, 18),
-        ));
-        core_meshes.push(meshes.add(
-            bevy::math::primitives::Sphere::new(radius * 0.65)
-                .mesh()
-                .uv(16, 8),
-        ));
+        outer_meshes.push(
+            meshes.add(
+                bevy::math::primitives::Sphere::new(radius)
+                    .mesh()
+                    .uv(32, 18),
+            ),
+        );
+        core_meshes.push(
+            meshes.add(
+                bevy::math::primitives::Sphere::new(radius * 0.65)
+                    .mesh()
+                    .uv(16, 8),
+            ),
+        );
     }
     let tier_meshes = TierMeshes {
         outer: outer_meshes.try_into().unwrap(),
@@ -470,7 +472,8 @@ fn setup_visuals(
         TargetingReticle,
         Mesh3d(meshes.add(Rectangle::new(1.0, 1.0))),
         MeshMaterial3d(reticle_mat),
-        Transform::from_xyz(0.0, 0.002, settings.launcher_z).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        Transform::from_xyz(0.0, 0.002, settings.launcher_z)
+            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
         Visibility::Hidden,
     ));
 
@@ -531,7 +534,7 @@ fn setup_visuals(
 // Observer — attach visual mesh and spawn root-level 2D label
 // ---------------------------------------------------------------------------
 
-fn on_sphere_added(
+pub(crate) fn on_sphere_added(
     trigger: On<Add, Sphere>,
     sphere_query: Query<&Sphere>,
     tier_mats: Option<Res<TierMaterials>>,
@@ -662,13 +665,16 @@ fn update_labels_screen_position(
     colorblind: Res<ColorblindMode>,
     effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
     sphere_query: Query<(Entity, &Transform, &Sphere)>,
-    mut label_query: Query<(&BillboardLabel, &mut Node, &mut Visibility), Without<Sphere>>,
+    mut label_query: Query<
+        (&BillboardLabel, &mut Node, &mut Visibility, &ComputedNode),
+        Without<Sphere>,
+    >,
     camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window>,
 ) {
     if !colorblind.0 {
         // If colorblind mode is OFF, hide all labels and exit
-        for (_, _, mut visibility) in label_query.iter_mut() {
+        for (_, _, mut visibility, _) in label_query.iter_mut() {
             crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
         }
         return;
@@ -686,7 +692,7 @@ fn update_labels_screen_position(
         .map(|m| *m == crate::game_state::VisualEffectsMode::On)
         .unwrap_or(true);
 
-    for (label, mut node, mut visibility) in label_query.iter_mut() {
+    for (label, mut node, mut visibility, computed_node) in label_query.iter_mut() {
         if let Ok((_, sphere_transform, _)) = sphere_query.get(label.0) {
             let sphere_pos = sphere_transform.translation;
             if sphere_pos.y < -0.1 {
@@ -705,9 +711,21 @@ fn update_labels_screen_position(
                 };
 
                 // Center UI text node (font size 22.0, single digit is approx 13x22px)
+                // Use ComputedNode size if populated, otherwise fallback to original static offsets.
+                let offset_x = if computed_node.size.x > 0.0 {
+                    computed_node.size.x * 0.5
+                } else {
+                    6.5
+                };
+                let offset_y = if computed_node.size.y > 0.0 {
+                    computed_node.size.y * 0.5
+                } else {
+                    11.0
+                };
+
                 node.position_type = PositionType::Absolute;
-                node.left = Val::Px(pos.x - 6.5);
-                node.top = Val::Px(pos.y - 11.0);
+                node.left = Val::Px(pos.x - offset_x);
+                node.top = Val::Px(pos.y - offset_y);
 
                 crate::utils::set_visibility(&mut visibility, Visibility::Visible);
             } else {
@@ -728,7 +746,7 @@ fn update_preview_label(
     settings: Res<GameSettings>,
     camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut label_query: Query<
-        (&mut Text, &mut Node, &mut Visibility),
+        (&mut Text, &mut Node, &mut Visibility, &ComputedNode),
         With<PreviewLabel>,
     >,
     window_query: Query<&Window>,
@@ -736,7 +754,7 @@ fn update_preview_label(
     let (Some(queue), Some(colorblind)) = (queue, colorblind) else {
         return;
     };
-    let Ok((mut text, mut node, mut visibility)) = label_query.single_mut() else {
+    let Ok((mut text, mut node, mut visibility, computed_node)) = label_query.single_mut() else {
         return;
     };
 
@@ -775,9 +793,20 @@ fn update_preview_label(
                 viewport_pos
             };
 
+            let offset_x = if computed_node.size.x > 0.0 {
+                computed_node.size.x * 0.5
+            } else {
+                6.5
+            };
+            let offset_y = if computed_node.size.y > 0.0 {
+                computed_node.size.y * 0.5
+            } else {
+                11.0
+            };
+
             node.position_type = PositionType::Absolute;
-            node.left = Val::Px(pos.x - 6.5);
-            node.top = Val::Px(pos.y - 11.0);
+            node.left = Val::Px(pos.x - offset_x);
+            node.top = Val::Px(pos.y - offset_y);
 
             crate::utils::set_visibility(&mut visibility, Visibility::Visible);
         } else {
@@ -789,7 +818,7 @@ fn update_preview_label(
 }
 
 // Despawn label entities whose sphere has already been despawned.
-fn cleanup_orphaned_labels(
+pub(crate) fn cleanup_orphaned_labels(
     mut commands: Commands,
     label_query: Query<(Entity, &BillboardLabel)>,
     sphere_query: Query<Entity, With<Sphere>>,
@@ -820,7 +849,14 @@ fn update_aim_guide_line(
     launcher_state: Res<LauncherState>,
     dispenser_queue: Option<Res<DispenserQueue>>,
     state: Option<Res<State<crate::game_state::AppState>>>,
-    mut query: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<LaserMaterial>), With<AimGuideLine>>,
+    mut query: Query<
+        (
+            &mut Transform,
+            &mut Visibility,
+            &MeshMaterial3d<LaserMaterial>,
+        ),
+        With<AimGuideLine>,
+    >,
     mut laser_materials: ResMut<Assets<LaserMaterial>>,
     mut last_tier: Local<Option<u8>>,
 ) {
@@ -856,7 +892,14 @@ fn update_targeting_reticle(
     settings: Res<GameSettings>,
     dispenser_queue: Option<Res<DispenserQueue>>,
     state: Option<Res<State<crate::game_state::AppState>>>,
-    mut query: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<ReticleMaterial>), With<TargetingReticle>>,
+    mut query: Query<
+        (
+            &mut Transform,
+            &mut Visibility,
+            &MeshMaterial3d<ReticleMaterial>,
+        ),
+        With<TargetingReticle>,
+    >,
     mut reticle_materials: ResMut<Assets<ReticleMaterial>>,
     preview_query: Query<&Transform, (With<LauncherPreview>, Without<TargetingReticle>)>,
     mut last_tier: Local<Option<u8>>,
@@ -865,17 +908,17 @@ fn update_targeting_reticle(
         let is_in_game = state
             .map(|s| *s.get() == crate::game_state::AppState::InGame)
             .unwrap_or(false);
-        
+
         if is_in_game {
             let elapsed = launcher_state.cooldown_timer.elapsed_secs();
             let is_preview_visible = launcher_state.cooldown_timer.is_finished() || elapsed >= 0.4;
-            
+
             if is_preview_visible {
                 crate::utils::set_visibility(&mut visibility, Visibility::Visible);
-                
+
                 let current_tier = dispenser_queue.as_ref().map(|dq| dq.current).unwrap_or(1);
                 let radius = crate::core_math::get_radius(current_tier);
-                
+
                 // Align reticle position perfectly with the preview sphere center
                 if let Ok(preview_transform) = preview_query.single() {
                     transform.translation = preview_transform.translation;
@@ -884,11 +927,11 @@ fn update_targeting_reticle(
                     transform.translation.y = radius;
                     transform.translation.z = settings.launcher_z;
                 }
-                
+
                 // Scale reticle to frame the sphere nicely
                 let reticle_scale = radius * 4.2;
                 transform.scale = Vec3::splat(reticle_scale);
-                
+
                 // Only mutate the material asset on tier changes (see update_aim_guide_line);
                 // rotation/pulse animation is driven by `globals.time` in the shader.
                 if *last_tier != Some(current_tier) {
@@ -1049,7 +1092,7 @@ fn update_sphere_effects(
     }
 }
 
-fn update_matrix_particles(
+pub(crate) fn update_matrix_particles(
     mut commands: Commands,
     time: Res<Time>,
     mut particle_query: Query<(Entity, &mut Transform, &mut MatrixParticle)>,
@@ -1267,10 +1310,7 @@ mod tests {
     #[test]
     fn test_label_projection() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            bevy::asset::AssetPlugin::default(),
-        ));
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()));
         app.insert_resource(GameSettings::default());
         app.insert_resource(ColorblindMode(true));
         app.insert_resource(LauncherState::default());
@@ -1280,7 +1320,8 @@ mod tests {
         });
 
         // Spawn 3D camera
-        let cam_transform = Transform::from_xyz(0.0, 15.0, 18.0).looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::Y);
+        let cam_transform =
+            Transform::from_xyz(0.0, 15.0, 18.0).looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::Y);
         app.world_mut().spawn((
             Camera3d::default(),
             Camera {
@@ -1302,17 +1343,21 @@ mod tests {
         });
 
         // Spawn preview label as a UI node
-        let preview_label_entity = app.world_mut().spawn((
-            PreviewLabel,
-            Text::new("1"),
-            TextFont::default(),
-            TextColor(Color::WHITE),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-            Visibility::Hidden,
-        )).id();
+        let preview_label_entity = app
+            .world_mut()
+            .spawn((
+                PreviewLabel,
+                Text::new("1"),
+                TextFont::default(),
+                TextColor(Color::WHITE),
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+                ComputedNode::default(),
+                Visibility::Hidden,
+            ))
+            .id();
 
         // Run systems: update_preview_label
         app.add_systems(Update, update_preview_label);
@@ -1321,12 +1366,18 @@ mod tests {
         app.update();
 
         // Check the label UI node properties
-        let label_node = app.world().entity(preview_label_entity).get::<Node>().unwrap();
-        let label_vis = app.world().entity(preview_label_entity).get::<Visibility>().unwrap();
+        let label_node = app
+            .world()
+            .entity(preview_label_entity)
+            .get::<Node>()
+            .unwrap();
+        let label_vis = app
+            .world()
+            .entity(preview_label_entity)
+            .get::<Visibility>()
+            .unwrap();
 
         assert!(matches!(label_node.position_type, PositionType::Absolute));
         assert_eq!(*label_vis, Visibility::Hidden);
     }
 }
-
-

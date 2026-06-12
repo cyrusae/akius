@@ -45,7 +45,10 @@ impl Plugin for PhysicsPlugin {
             // instead of simulating forever beneath the arena.
             .add_systems(
                 Update,
-                (handle_despawn_delay.after(resolve_merges), despawn_fallen_spheres),
+                (
+                    handle_despawn_delay.after(resolve_merges),
+                    despawn_fallen_spheres,
+                ),
             )
             .add_systems(
                 OnEnter(crate::game_state::AppState::GameOver),
@@ -653,5 +656,169 @@ mod tests {
             .get::<LockedAxes>()
             .unwrap();
         assert_eq!(*axes_spilled, LockedAxes::empty());
+    }
+
+    #[test]
+    fn test_entity_count_soak() {
+        use crate::game_state::{ActiveFulfillment, Fulfilling};
+        use crate::visuals::{
+            cleanup_orphaned_labels, handle_placeholder_bursts, on_sphere_added,
+            update_matrix_particles, MatrixParticleAssets, TierMaterials, TierMeshes,
+        };
+
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::state::app::StatesPlugin,
+            bevy::asset::AssetPlugin::default(),
+        ));
+
+        // Add observer
+        app.add_observer(on_sphere_added);
+
+        // Add message types
+        app.add_message::<CollisionEvent>();
+        app.add_message::<MergeEvent>();
+        app.add_message::<crate::game_state::MergeBurstEvent>();
+        app.add_message::<crate::game_state::FulfillmentBurstEvent>();
+
+        // Insert required resources
+        app.insert_resource(Score {
+            total: 0,
+            peak_tier: 0,
+            completed_orders: 0,
+        });
+        app.insert_resource(crate::game_state::ActiveOrder { target_tier: 6 });
+        app.insert_resource(ActiveFulfillment::default());
+        app.insert_resource(crate::game_state::GameSettings {
+            launcher_z: 12.0,
+            ..default()
+        });
+        app.insert_resource(crate::game_state::ColorblindMode(true));
+
+        // Insert dummy assets for observer and particle systems
+        app.insert_resource(TierMaterials {
+            normal: std::array::from_fn(|_| Handle::default()),
+            core: std::array::from_fn(|_| Handle::default()),
+        });
+        app.insert_resource(TierMeshes {
+            outer: std::array::from_fn(|_| Handle::default()),
+            core: std::array::from_fn(|_| Handle::default()),
+        });
+        app.insert_resource(MatrixParticleAssets {
+            mesh: Handle::default(),
+            merge_material: Handle::default(),
+            fulfill_material: Handle::default(),
+        });
+
+        // Add systems
+        app.add_plugins(PhysicsPlugin);
+        app.add_systems(
+            Update,
+            (
+                cleanup_orphaned_labels,
+                handle_placeholder_bursts,
+                update_matrix_particles,
+                crate::game_state::check_order_fulfillment,
+            )
+                .run_if(in_state(AppState::InGame)),
+        );
+
+        // Set time update strategy to manual
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f32(1.0 / 60.0),
+        ));
+
+        app.init_state::<AppState>();
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update(); // Apply state transition
+
+        // Record baseline entities (e.g. camera, window, static objects, etc.)
+        let baseline_count = app.world_mut().query::<Entity>().iter(app.world()).count();
+
+        // 1. Spawn two tier-1 spheres
+        let entity_a = spawn_sphere_entity(
+            &mut app.world_mut().commands(),
+            1,
+            Vec3::new(-0.2, 0.0, 0.0),
+            Vec3::ZERO,
+        )
+        .id();
+        let entity_b = spawn_sphere_entity(
+            &mut app.world_mut().commands(),
+            1,
+            Vec3::new(0.2, 0.0, 0.0),
+            Vec3::ZERO,
+        )
+        .id();
+
+        app.update(); // Spawn them, runs observer
+
+        // Trigger collision between them
+        app.world_mut()
+            .resource_mut::<Messages<CollisionEvent>>()
+            .write(CollisionEvent::Started(
+                entity_a,
+                entity_b,
+                CollisionEventFlags::empty(),
+            ));
+
+        // Advance 30 frames to let merge resolve, upgraded sphere spawn, particles burst, and merge cooldown to finish (takes 24 frames/0.4s)
+        for _ in 0..30 {
+            app.update();
+        }
+
+        // Verify upgraded sphere is spawned (tier 2)
+        let mut query = app.world_mut().query::<(Entity, &Sphere)>();
+        let mut found_tier2 = None;
+        for (entity, sphere) in query.iter(app.world()) {
+            if sphere.tier == 2 {
+                found_tier2 = Some(entity);
+            }
+        }
+        assert!(found_tier2.is_some(), "Tier 2 sphere should have spawned");
+        let tier2_entity = found_tier2.unwrap();
+
+        // Change target order to tier 2 to trigger order fulfillment on it
+        app.world_mut()
+            .resource_mut::<crate::game_state::ActiveOrder>()
+            .target_tier = 2;
+
+        app.update(); // check_order_fulfillment runs and sets target to fulfilling
+
+        // Verify it is now Fulfilling
+        assert!(
+            app.world().entity(tier2_entity).contains::<Fulfilling>(),
+            "Sphere should be in Fulfilling state"
+        );
+
+        // Run app for 100 frames to let fulfillment timer (1.2s -> 72 frames) complete
+        // and despawn the fulfilling sphere
+        for _ in 0..100 {
+            app.update();
+        }
+
+        // Verify the sphere is despawned
+        assert!(
+            app.world().get_entity(tier2_entity).is_err(),
+            "Fulfilling sphere should be despawned"
+        );
+
+        // Run another 150 frames to ensure all particles (max 2.0s -> 120 frames) have fully expired and despawned,
+        // and orphaned labels are cleaned up
+        for _ in 0..150 {
+            app.update();
+        }
+
+        // Verify total entity count is back to baseline
+        let final_count = app.world_mut().query::<Entity>().iter(app.world()).count();
+
+        assert_eq!(
+            final_count, baseline_count,
+            "Leaked entities found! Baseline: {}, Final: {}",
+            baseline_count, final_count
+        );
     }
 }

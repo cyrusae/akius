@@ -279,13 +279,19 @@ pub fn handle_launch_input(
 
     let mut touch_fired = false;
     for touch in touches.iter_just_released() {
-        if let Some(pos) = launcher_state.active_touch_ids.iter().position(|&id| id == touch.id()) {
+        if let Some(pos) = launcher_state
+            .active_touch_ids
+            .iter()
+            .position(|&id| id == touch.id())
+        {
             touch_fired = true;
             launcher_state.active_touch_ids.swap_remove(pos);
         }
     }
 
-    launcher_state.active_touch_ids.retain(|&id| touches.get_pressed(id).is_some());
+    launcher_state
+        .active_touch_ids
+        .retain(|&id| touches.get_pressed(id).is_some());
 
     let fire_pressed = if is_touch_active {
         touch_fired && !over_ui
@@ -584,13 +590,15 @@ mod tests {
         );
 
         // Case 1: Touch started before InGame (e.g. in MainMenu)
-        app.world_mut().resource_mut::<Messages<TouchInput>>().write(TouchInput {
-            id: 42,
-            phase: TouchPhase::Started,
-            position: Vec2::new(100.0, 100.0),
-            force: None,
-            window: Entity::PLACEHOLDER,
-        });
+        app.world_mut()
+            .resource_mut::<Messages<TouchInput>>()
+            .write(TouchInput {
+                id: 42,
+                phase: TouchPhase::Started,
+                position: Vec2::new(100.0, 100.0),
+                force: None,
+                window: Entity::PLACEHOLDER,
+            });
         app.update();
 
         // Transition to InGame
@@ -600,43 +608,53 @@ mod tests {
         app.update(); // Apply state transition
 
         // Release the touch that started in MainMenu
-        app.world_mut().resource_mut::<Messages<TouchInput>>().write(TouchInput {
-            id: 42,
-            phase: TouchPhase::Ended,
-            position: Vec2::new(100.0, 100.0),
-            force: None,
-            window: Entity::PLACEHOLDER,
-        });
+        app.world_mut()
+            .resource_mut::<Messages<TouchInput>>()
+            .write(TouchInput {
+                id: 42,
+                phase: TouchPhase::Ended,
+                position: Vec2::new(100.0, 100.0),
+                force: None,
+                window: Entity::PLACEHOLDER,
+            });
         app.update();
 
         // Verify that the sphere did NOT launch (current remains 1)
         assert_eq!(
-            app.world().resource::<crate::game_state::DispenserQueue>().current,
+            app.world()
+                .resource::<crate::game_state::DispenserQueue>()
+                .current,
             1
         );
 
         // Case 2: Touch starts inside InGame
-        app.world_mut().resource_mut::<Messages<TouchInput>>().write(TouchInput {
-            id: 43,
-            phase: TouchPhase::Started,
-            position: Vec2::new(100.0, 100.0),
-            force: None,
-            window: Entity::PLACEHOLDER,
-        });
+        app.world_mut()
+            .resource_mut::<Messages<TouchInput>>()
+            .write(TouchInput {
+                id: 43,
+                phase: TouchPhase::Started,
+                position: Vec2::new(100.0, 100.0),
+                force: None,
+                window: Entity::PLACEHOLDER,
+            });
         app.update();
 
-        app.world_mut().resource_mut::<Messages<TouchInput>>().write(TouchInput {
-            id: 43,
-            phase: TouchPhase::Ended,
-            position: Vec2::new(100.0, 100.0),
-            force: None,
-            window: Entity::PLACEHOLDER,
-        });
+        app.world_mut()
+            .resource_mut::<Messages<TouchInput>>()
+            .write(TouchInput {
+                id: 43,
+                phase: TouchPhase::Ended,
+                position: Vec2::new(100.0, 100.0),
+                force: None,
+                window: Entity::PLACEHOLDER,
+            });
         app.update();
 
         // Verify that the sphere DID launch (current becomes 2)
         assert_eq!(
-            app.world().resource::<crate::game_state::DispenserQueue>().current,
+            app.world()
+                .resource::<crate::game_state::DispenserQueue>()
+                .current,
             2
         );
     }
