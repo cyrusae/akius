@@ -60,7 +60,7 @@ fn setup_crt_shader(mut shaders: ResMut<Assets<Shader>>) {
 fn update_crt_settings(
     time: Res<Time>,
     window_query: Query<&Window>,
-    camera_query: Query<Entity, With<Camera3d>>,
+    mut camera_query: Query<(Entity, Option<&mut CrtPostProcessSettings>), With<Camera3d>>,
     mut commands: Commands,
     effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
     mut fulfill_events: MessageReader<crate::game_state::FulfillmentBurstEvent>,
@@ -82,16 +82,29 @@ fn update_crt_settings(
         *glitch_val = 1.0;
     }
 
-    for entity in camera_query.iter() {
-        if is_effects_on {
-            commands.entity(entity).insert(CrtPostProcessSettings {
-                time: time.elapsed_secs(),
-                aspect_ratio,
-                glitch_intensity: *glitch_val,
-                _padding: 0.0,
-            });
-        } else {
-            commands.entity(entity).remove::<CrtPostProcessSettings>();
+    for (entity, settings) in camera_query.iter_mut() {
+        match (is_effects_on, settings) {
+            // Steady state: mutate the existing component in place instead of
+            // re-inserting it through Commands every frame.
+            (true, Some(mut settings)) => {
+                settings.time = time.elapsed_secs();
+                settings.aspect_ratio = aspect_ratio;
+                settings.glitch_intensity = *glitch_val;
+            }
+            // FX just turned on (or first frame): attach the component.
+            (true, None) => {
+                commands.entity(entity).insert(CrtPostProcessSettings {
+                    time: time.elapsed_secs(),
+                    aspect_ratio,
+                    glitch_intensity: *glitch_val,
+                    _padding: 0.0,
+                });
+            }
+            // FX just turned off: detach. No-op once already removed.
+            (false, Some(_)) => {
+                commands.entity(entity).remove::<CrtPostProcessSettings>();
+            }
+            (false, None) => {}
         }
     }
 }

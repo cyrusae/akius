@@ -25,16 +25,27 @@ impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MergeEvent>()
             .add_message::<crate::game_state::MergeBurstEvent>()
+            // Merge detection/resolution only makes sense during gameplay; without the
+            // state gate these (including an O(n^2) scan) keep running on the menu and
+            // end screens.
             .add_systems(
                 Update,
                 (
                     (detect_collisions, check_distance_merges),
                     resolve_merges,
                     tick_merge_cooldowns,
-                    handle_despawn_delay,
                     spill_spheres,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(in_state(crate::game_state::AppState::InGame)),
+            )
+            // These must keep running outside InGame: pending despawns have to flush
+            // even if a merge triggered a state change, and spheres shoved off the
+            // table on game over need to be cleaned up once they fall out of view
+            // instead of simulating forever beneath the arena.
+            .add_systems(
+                Update,
+                (handle_despawn_delay.after(resolve_merges), despawn_fallen_spheres),
             )
             .add_systems(
                 OnEnter(crate::game_state::AppState::GameOver),
@@ -93,6 +104,7 @@ pub fn detect_collisions(
         &Sphere,
         (
             Without<MergeCooldown>,
+            Without<DespawnDelay>,
             Without<crate::game_state::Fulfilling>,
         ),
     >,
@@ -120,25 +132,35 @@ pub fn check_distance_merges(
         (Entity, &Sphere, &Transform),
         (
             Without<MergeCooldown>,
+            Without<DespawnDelay>,
             Without<crate::game_state::Fulfilling>,
         ),
     >,
+    // Scratch buffers reused across frames: WASM linear memory never shrinks, so
+    // avoiding fresh per-frame allocations keeps the heap high-water mark down.
+    mut spheres: Local<Vec<(Entity, u8, Vec3)>>,
+    mut merged_this_frame: Local<HashSet<Entity>>,
 ) {
-    let spheres: Vec<_> = sphere_query.iter().collect();
-    let mut merged_this_frame = HashSet::new();
+    spheres.clear();
+    spheres.extend(
+        sphere_query
+            .iter()
+            .map(|(e, s, t)| (e, s.tier, t.translation)),
+    );
+    merged_this_frame.clear();
 
     for i in 0..spheres.len() {
         for j in (i + 1)..spheres.len() {
-            let (e1, s1, t1) = spheres[i];
-            let (e2, s2, t2) = spheres[j];
+            let (e1, tier1, pos1) = spheres[i];
+            let (e2, tier2, pos2) = spheres[j];
 
-            if s1.tier == s2.tier {
-                let r1 = crate::core_math::get_radius(s1.tier);
-                let r2 = crate::core_math::get_radius(s2.tier);
+            if tier1 == tier2 {
+                let r1 = crate::core_math::get_radius(tier1);
+                let r2 = crate::core_math::get_radius(tier2);
 
                 // Merge if distance is within the sum of radii + 0.07 units buffer
                 let threshold = r1 + r2 + 0.07;
-                let dist = t1.translation.distance(t2.translation);
+                let dist = pos1.distance(pos2);
 
                 if dist < threshold
                     && !merged_this_frame.contains(&e1)
@@ -235,6 +257,22 @@ pub fn resolve_merges(
     }
 }
 
+/// Despawns spheres that have fallen far below the arena (e.g. spilled off the
+/// table edge, or shoved off on game over). Without this, unlocked spheres
+/// free-fall forever — Rapier never sleeps them, so they cost physics time for
+/// as long as the end screen stays open.
+pub fn despawn_fallen_spheres(
+    mut commands: Commands,
+    sphere_query: Query<(Entity, &Transform), With<Sphere>>,
+) {
+    const DESPAWN_Y: f32 = -20.0;
+    for (entity, transform) in sphere_query.iter() {
+        if transform.translation.y < DESPAWN_Y {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 pub fn handle_despawn_delay(mut commands: Commands, mut query: Query<(Entity, &mut DespawnDelay)>) {
     for (entity, mut delay) in query.iter_mut() {
         if delay.frames == 0 {
@@ -264,9 +302,9 @@ pub fn tick_merge_cooldowns(
 pub fn spill_spheres(
     mut commands: Commands,
     sphere_query: Query<(Entity, &Transform, Option<&LockedAxes>), With<Sphere>>,
-    settings: Option<Res<crate::game_state::GameSettings>>,
+    settings: Res<crate::game_state::GameSettings>,
 ) {
-    let launcher_z = settings.map(|s| s.launcher_z).unwrap_or(12.0);
+    let launcher_z = settings.launcher_z;
     for (entity, transform, locked_axes) in sphere_query.iter() {
         if transform.translation.z > launcher_z {
             if let Some(axes) = locked_axes {
@@ -366,6 +404,14 @@ mod tests {
             completed_orders: 0,
         });
 
+        app.insert_resource(crate::game_state::GameSettings::default());
+
+        // Merge systems are gated on AppState::InGame
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update();
+
         // Spawn two adjacent Tier 1 spheres
         let entity_a = spawn_sphere_entity(
             &mut app.world_mut().commands(),
@@ -438,6 +484,14 @@ mod tests {
             completed_orders: 0,
         });
 
+        app.insert_resource(crate::game_state::GameSettings::default());
+
+        // Merge systems are gated on AppState::InGame
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update();
+
         let entity_a = spawn_sphere_entity(
             &mut app.world_mut().commands(),
             1,
@@ -502,6 +556,14 @@ mod tests {
             peak_tier: 0,
             completed_orders: 0,
         });
+
+        app.insert_resource(crate::game_state::GameSettings::default());
+
+        // Merge systems are gated on AppState::InGame
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update();
 
         let entity_a = spawn_sphere_entity(
             &mut app.world_mut().commands(),

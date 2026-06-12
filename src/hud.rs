@@ -427,8 +427,7 @@ fn update_order_hud(
     let Some(active_order) = active_order else {
         return;
     };
-    let idx = (active_order.target_tier as usize).saturating_sub(1).min(8);
-    let color = TIER_COLORS[idx];
+    let color = TIER_COLORS[crate::visuals::tier_index(active_order.target_tier)];
 
     if let Ok(mut bg) = swatch_query.single_mut() {
         if bg.0 != color {
@@ -488,9 +487,7 @@ fn update_next_sphere_hud(
     let Some(queue) = queue else {
         return;
     };
-    let idx = (queue.next as usize).saturating_sub(1).min(8);
-
-    let color = TIER_COLORS[idx];
+    let color = TIER_COLORS[crate::visuals::tier_index(queue.next)];
 
     if let Ok(mut bg) = swatch_query.single_mut() {
         if bg.0 != color {

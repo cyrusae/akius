@@ -69,7 +69,22 @@ fn main() {
             )
                 .run_if(in_state(game_state::AppState::InGame)),
         )
-        .add_systems(Update, (game_state::update_high_score, adjust_camera_fov))
+        .add_systems(
+            Update,
+            (
+                game_state::update_high_score,
+                game_state::auto_degrade_visual_effects,
+                adjust_camera_fov,
+            ),
+        )
+        .add_systems(
+            OnEnter(game_state::AppState::GameOver),
+            game_state::flush_high_score,
+        )
+        .add_systems(
+            OnEnter(game_state::AppState::Win),
+            game_state::flush_high_score,
+        )
         .run();
 }
 
@@ -87,14 +102,19 @@ fn adjust_camera_fov(
 
     if let Projection::Perspective(ref mut perspective) = *projection {
         let aspect_ratio = window.width() / window.height();
-        if aspect_ratio < 1.0 {
+        let target_fov = if aspect_ratio < 1.0 {
             // Keep the horizontal field of view constant by adjusting vertical fov:
             // tan(fov_v / 2) = tan(fov_h_desired / 2) / aspect_ratio
             // Target a horizontal FOV half-angle tangent of 0.34 to keep board tight.
             let desired_fov_v = 2.0 * (0.34 / aspect_ratio).atan();
-            perspective.fov = desired_fov_v.clamp(std::f32::consts::FRAC_PI_4, 1.2);
+            desired_fov_v.clamp(std::f32::consts::FRAC_PI_4, 1.2)
         } else {
-            perspective.fov = std::f32::consts::FRAC_PI_4;
+            std::f32::consts::FRAC_PI_4
+        };
+        // Only write on actual change: unconditional writes dirty Changed<Projection>
+        // every frame and force downstream camera re-preparation.
+        if (perspective.fov - target_fov).abs() > 1e-6 {
+            perspective.fov = target_fov;
         }
     }
 }

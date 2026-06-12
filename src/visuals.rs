@@ -21,6 +21,12 @@ pub const TIER_COLORS: [Color; 9] = [
     Color::hsl(45.0, 0.95, 0.55),  // Tier  9 — gold (secret win)
 ];
 
+/// Converts a 1-indexed tier into a clamped index into the 9-element tier arrays
+/// (`TIER_COLORS`, `TierMaterials`, `TierMeshes`).
+pub fn tier_index(tier: u8) -> usize {
+    (tier as usize).saturating_sub(1).min(8)
+}
+
 // ---------------------------------------------------------------------------
 // Components
 // ---------------------------------------------------------------------------
@@ -42,6 +48,18 @@ pub struct PreviewCore;
 pub struct MatrixParticle {
     pub velocity: Vec3,
     pub lifetime: Timer,
+    /// Full-size (width, height) of the particle quad; shrunk over the lifetime
+    /// as a stand-in for alpha fade so all particles can share one material.
+    pub base_size: Vec2,
+}
+
+/// Shared mesh/material handles for Matrix burst particles, so spawning bursts
+/// never creates new assets.
+#[derive(Resource)]
+pub struct MatrixParticleAssets {
+    pub mesh: Handle<Mesh>,
+    pub merge_material: Handle<StandardMaterial>,
+    pub fulfill_material: Handle<StandardMaterial>,
 }
 
 /// Tag on a root-level Text2d label entity. Stores the sphere entity it follows.
@@ -113,10 +131,6 @@ impl Material for FloorMaterial {
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub struct LaserUniforms {
     pub color: LinearRgba,
-    pub time: f32,
-    pub _padding1: f32,
-    pub _padding2: f32,
-    pub _padding3: f32,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -138,10 +152,6 @@ impl Material for LaserMaterial {
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub struct ReticleUniforms {
     pub color: LinearRgba,
-    pub time: f32,
-    pub _padding1: f32,
-    pub _padding2: f32,
-    pub _padding3: f32,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -226,8 +236,7 @@ fn build_tier_materials(
 
 /// Return the correct material handle for a tier (1-indexed).
 pub fn material_for_tier(tier: u8, tier_mats: &TierMaterials) -> Handle<SphereMaterial> {
-    let idx = (tier as usize).saturating_sub(1).min(8);
-    tier_mats.normal[idx].clone()
+    tier_mats.normal[tier_index(tier)].clone()
 }
 
 // ---------------------------------------------------------------------------
@@ -350,6 +359,25 @@ fn setup_visuals(
         font: font_handle.clone(),
     });
 
+    // Shared assets for Matrix burst particles (unit quad, scaled per particle).
+    // Additive blending gives the phosphor-glow look on the black arena without
+    // needing per-particle alpha (and thus per-particle materials).
+    commands.insert_resource(MatrixParticleAssets {
+        mesh: meshes.add(Rectangle::new(1.0, 1.0)),
+        merge_material: materials.add(StandardMaterial {
+            base_color: Color::hsl(120.0, 0.95, 0.6),
+            unlit: true,
+            alpha_mode: AlphaMode::Add,
+            ..default()
+        }),
+        fulfill_material: materials.add(StandardMaterial {
+            base_color: Color::hsl(120.0, 0.95, 0.65),
+            unlit: true,
+            alpha_mode: AlphaMode::Add,
+            ..default()
+        }),
+    });
+
     let half_w = settings.arena_width * 0.5;
     let depth = settings.arena_depth;
     let wh = settings.wall_height;
@@ -420,10 +448,6 @@ fn setup_visuals(
     let laser_mat = laser_materials.add(LaserMaterial {
         uniforms: LaserUniforms {
             color: LinearRgba::from(TIER_COLORS[0]),
-            time: 0.0,
-            _padding1: 0.0,
-            _padding2: 0.0,
-            _padding3: 0.0,
         },
     });
     commands.spawn((
@@ -439,10 +463,6 @@ fn setup_visuals(
     let reticle_mat = reticle_materials.add(ReticleMaterial {
         uniforms: ReticleUniforms {
             color: LinearRgba::from(TIER_COLORS[0]),
-            time: 0.0,
-            _padding1: 0.0,
-            _padding2: 0.0,
-            _padding3: 0.0,
         },
     });
     commands.spawn((
@@ -526,7 +546,7 @@ fn on_sphere_added(
     let (Some(tier_mats), Some(tier_meshes)) = (tier_mats, tier_meshes) else {
         return;
     };
-    let idx = (sphere.tier as usize).saturating_sub(1).min(8);
+    let idx = tier_index(sphere.tier);
     let mat = material_for_tier(sphere.tier, &tier_mats);
     let mesh = tier_meshes.outer[idx].clone();
 
@@ -580,6 +600,30 @@ fn on_sphere_added(
     }
 }
 
+/// Maps an undistorted viewport position to where the CRT post-process shader
+/// actually displays it on screen.
+///
+/// The shader's `curve()` runs in the *inverse* direction: for each output pixel
+/// it computes which source-texture position to sample (`textureSample(src, curve(out_uv))`).
+/// A scene point projected to source position `p` therefore appears on screen at
+/// `q` where `curve(q) = p` — i.e. pulled *toward* the screen center, not pushed
+/// away from it. Labels must apply the inverse of `curve`, which has a closed form
+/// because the shader distorts X first and then derives Y from the distorted X:
+///
+/// ```text
+/// forward (shader):  X = a*(1 + b^2/BEND);  Y = b*(1 + X^2/BEND)
+/// inverse (here):    b = Y/(1 + X^2/BEND);  a = X/(1 + b^2/BEND)
+/// ```
+///
+/// `BEND` must stay in sync with `bend` in `assets/shaders/crt_post_process.wgsl`.
+pub fn crt_screen_position(viewport_pos: Vec2, window_size: Vec2) -> Vec2 {
+    const BEND: f32 = 3.8;
+    let s = viewport_pos / window_size - Vec2::splat(0.5);
+    let qy = s.y / (1.0 + (s.x * s.x) / BEND);
+    let qx = s.x / (1.0 + (qy * qy) / BEND);
+    (Vec2::new(qx, qy) + Vec2::splat(0.5)) * window_size
+}
+
 // ---------------------------------------------------------------------------
 // Update — keep preview sphere material in sync with current queue tier
 // ---------------------------------------------------------------------------
@@ -597,11 +641,16 @@ fn update_preview_material(
     let Ok(mut mat_handle) = preview_query.single_mut() else {
         return;
     };
-    *mat_handle = MeshMaterial3d(material_for_tier(queue.current, &tier_mats));
+    // Only reassign when the handle actually changes: an unconditional write dirties
+    // Changed<MeshMaterial3d> every frame and forces the render world to re-bind the
+    // preview's material even when the tier is unchanged.
+    let new_mat = material_for_tier(queue.current, &tier_mats);
+    if mat_handle.0 != new_mat {
+        mat_handle.0 = new_mat;
+    }
 
     if let Some(mut core_mat_handle) = preview_core_query.iter_mut().next() {
-        let idx = (queue.current as usize).saturating_sub(1).min(8);
-        let core_mat = tier_mats.core[idx].clone();
+        let core_mat = tier_mats.core[tier_index(queue.current)].clone();
         if core_mat_handle.0 != core_mat {
             core_mat_handle.0 = core_mat;
         }
@@ -647,25 +696,18 @@ fn update_labels_screen_position(
 
             // Project coordinates
             if let Ok(viewport_pos) = camera.world_to_viewport(cam_transform, sphere_pos) {
-                let mut x = viewport_pos.x;
-                let mut y = viewport_pos.y;
-
-                if is_effects_on {
-                    // Apply the exact same barrel distortion curve as the CRT post-process shader
-                    let uv = Vec2::new(viewport_pos.x / win_w, viewport_pos.y / win_h);
-                    let mut u = uv - Vec2::new(0.5, 0.5);
-                    let bend = Vec2::new(3.8, 3.8);
-                    u.x *= 1.0 + (u.y * u.y) / bend.x;
-                    u.y *= 1.0 + (u.x * u.x) / bend.y;
-                    let uv_distorted = u + Vec2::new(0.5, 0.5);
-                    x = uv_distorted.x * win_w;
-                    y = uv_distorted.y * win_h;
-                }
+                let pos = if is_effects_on {
+                    // Match the CRT post-process: invert the shader's sampling curve
+                    // to find where the sphere is actually drawn on screen.
+                    crt_screen_position(viewport_pos, Vec2::new(win_w, win_h))
+                } else {
+                    viewport_pos
+                };
 
                 // Center UI text node (font size 22.0, single digit is approx 13x22px)
                 node.position_type = PositionType::Absolute;
-                node.left = Val::Px(x - 6.5);
-                node.top = Val::Px(y - 11.0);
+                node.left = Val::Px(pos.x - 6.5);
+                node.top = Val::Px(pos.y - 11.0);
 
                 crate::utils::set_visibility(&mut visibility, Visibility::Visible);
             } else {
@@ -725,24 +767,17 @@ fn update_preview_label(
         let world_pos = Vec3::new(launcher_state.active_x, radius, settings.launcher_z);
 
         if let Ok(viewport_pos) = camera.world_to_viewport(cam_transform, world_pos) {
-            let mut x = viewport_pos.x;
-            let mut y = viewport_pos.y;
-
-            if is_effects_on {
-                // Apply the exact same barrel distortion curve as the CRT post-process shader
-                let uv = Vec2::new(viewport_pos.x / win_w, viewport_pos.y / win_h);
-                let mut u = uv - Vec2::new(0.5, 0.5);
-                let bend = Vec2::new(3.8, 3.8);
-                u.x *= 1.0 + (u.y * u.y) / bend.x;
-                u.y *= 1.0 + (u.x * u.x) / bend.y;
-                let uv_distorted = u + Vec2::new(0.5, 0.5);
-                x = uv_distorted.x * win_w;
-                y = uv_distorted.y * win_h;
-            }
+            let pos = if is_effects_on {
+                // Match the CRT post-process: invert the shader's sampling curve
+                // to find where the sphere is actually drawn on screen.
+                crt_screen_position(viewport_pos, Vec2::new(win_w, win_h))
+            } else {
+                viewport_pos
+            };
 
             node.position_type = PositionType::Absolute;
-            node.left = Val::Px(x - 6.5);
-            node.top = Val::Px(y - 11.0);
+            node.left = Val::Px(pos.x - 6.5);
+            node.top = Val::Px(pos.y - 11.0);
 
             crate::utils::set_visibility(&mut visibility, Visibility::Visible);
         } else {
@@ -784,10 +819,10 @@ fn update_aim_guide_line(
     aim_line_mode: Res<AimLineMode>,
     launcher_state: Res<LauncherState>,
     dispenser_queue: Option<Res<DispenserQueue>>,
-    time: Res<Time>,
     state: Option<Res<State<crate::game_state::AppState>>>,
     mut query: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<LaserMaterial>), With<AimGuideLine>>,
     mut laser_materials: ResMut<Assets<LaserMaterial>>,
+    mut last_tier: Local<Option<u8>>,
 ) {
     if let Ok((mut transform, mut visibility, mat_handle)) = query.single_mut() {
         let is_in_game = state
@@ -796,12 +831,19 @@ fn update_aim_guide_line(
         if aim_line_mode.0 && is_in_game {
             crate::utils::set_visibility(&mut visibility, Visibility::Visible);
             transform.translation.x = launcher_state.active_x;
-            
-            if let Some(mat) = laser_materials.get_mut(&mat_handle.0) {
-                let current_tier = dispenser_queue.as_ref().map(|dq| dq.current).unwrap_or(1);
-                let color = TIER_COLORS[(current_tier as usize).saturating_sub(1).min(8)];
-                mat.uniforms.color = LinearRgba::from(color);
-                mat.uniforms.time = time.elapsed_secs();
+
+            // Only touch the material asset when the tier (and thus color) actually
+            // changes. Mutating an asset fires AssetEvent::Modified, which forces the
+            // render world to rebuild the material's GPU buffers — doing that every
+            // frame is needless churn. The animation time comes from `globals.time`
+            // inside the shader instead.
+            let current_tier = dispenser_queue.as_ref().map(|dq| dq.current).unwrap_or(1);
+            if *last_tier != Some(current_tier) {
+                if let Some(mat) = laser_materials.get_mut(&mat_handle.0) {
+                    let color = TIER_COLORS[tier_index(current_tier)];
+                    mat.uniforms.color = LinearRgba::from(color);
+                    *last_tier = Some(current_tier);
+                }
             }
         } else {
             crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
@@ -813,11 +855,11 @@ fn update_targeting_reticle(
     launcher_state: Res<LauncherState>,
     settings: Res<GameSettings>,
     dispenser_queue: Option<Res<DispenserQueue>>,
-    time: Res<Time>,
     state: Option<Res<State<crate::game_state::AppState>>>,
     mut query: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<ReticleMaterial>), With<TargetingReticle>>,
     mut reticle_materials: ResMut<Assets<ReticleMaterial>>,
     preview_query: Query<&Transform, (With<LauncherPreview>, Without<TargetingReticle>)>,
+    mut last_tier: Local<Option<u8>>,
 ) {
     if let Ok((mut transform, mut visibility, mat_handle)) = query.single_mut() {
         let is_in_game = state
@@ -847,10 +889,14 @@ fn update_targeting_reticle(
                 let reticle_scale = radius * 4.2;
                 transform.scale = Vec3::splat(reticle_scale);
                 
-                if let Some(mat) = reticle_materials.get_mut(&mat_handle.0) {
-                    let color = TIER_COLORS[(current_tier as usize).saturating_sub(1).min(8)];
-                    mat.uniforms.color = LinearRgba::from(color);
-                    mat.uniforms.time = time.elapsed_secs();
+                // Only mutate the material asset on tier changes (see update_aim_guide_line);
+                // rotation/pulse animation is driven by `globals.time` in the shader.
+                if *last_tier != Some(current_tier) {
+                    if let Some(mat) = reticle_materials.get_mut(&mat_handle.0) {
+                        let color = TIER_COLORS[tier_index(current_tier)];
+                        mat.uniforms.color = LinearRgba::from(color);
+                        *last_tier = Some(current_tier);
+                    }
                 }
             } else {
                 crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
@@ -896,10 +942,8 @@ pub fn animate_merged_spawns(
     cooldown_query: Query<&crate::physics::MergeCooldown>,
     fulfilling_query: Query<&crate::game_state::Fulfilling>,
     mut visual_query: Query<(&ChildOf, &mut Transform), Or<(With<SphereVisual>, With<SphereCore>)>>,
-    mut label_query: Query<
-        (&BillboardLabel, &mut Transform),
-        (Without<SphereVisual>, Without<SphereCore>),
-    >,
+    // Labels are UI nodes: in Bevy 0.18 they carry `UiTransform`, not `Transform`.
+    mut label_query: Query<(&BillboardLabel, &mut UiTransform)>,
 ) {
     for (child_of, mut transform) in visual_query.iter_mut() {
         let parent = child_of.0;
@@ -918,7 +962,7 @@ pub fn animate_merged_spawns(
             }
         }
     }
-    for (label, mut transform) in label_query.iter_mut() {
+    for (label, mut ui_transform) in label_query.iter_mut() {
         let parent = label.0;
         if fulfilling_query.contains(parent) {
             continue; // Skip fulfilling spheres
@@ -928,11 +972,9 @@ pub fn animate_merged_spawns(
                 cooldown.timer.elapsed_secs(),
                 cooldown.timer.duration().as_secs_f32(),
             );
-            transform.scale = Vec3::splat(scale);
-        } else {
-            if transform.scale != Vec3::ONE {
-                transform.scale = Vec3::ONE;
-            }
+            ui_transform.scale = Vec2::splat(scale);
+        } else if ui_transform.scale != Vec2::ONE {
+            ui_transform.scale = Vec2::ONE;
         }
     }
 }
@@ -940,10 +982,8 @@ pub fn animate_merged_spawns(
 pub fn animate_fulfilling_spheres(
     fulfillment: Option<Res<crate::game_state::ActiveFulfillment>>,
     mut visual_query: Query<(&ChildOf, &mut Transform), Or<(With<SphereVisual>, With<SphereCore>)>>,
-    mut label_query: Query<
-        (&BillboardLabel, &mut Transform),
-        (Without<SphereVisual>, Without<SphereCore>),
-    >,
+    // Labels are UI nodes: in Bevy 0.18 they carry `UiTransform`, not `Transform`.
+    mut label_query: Query<(&BillboardLabel, &mut UiTransform)>,
 ) {
     let Some(fulfillment) = fulfillment else {
         return;
@@ -953,16 +993,15 @@ pub fn animate_fulfilling_spheres(
             fulfillment.timer.elapsed_secs(),
             fulfillment.timer.duration().as_secs_f32(),
         );
-        let scale_vec = Vec3::splat(scale);
 
         for (child_of, mut transform) in visual_query.iter_mut() {
             if child_of.0 == fulfilling_entity {
-                transform.scale = scale_vec;
+                transform.scale = Vec3::splat(scale);
             }
         }
-        for (label, mut transform) in label_query.iter_mut() {
+        for (label, mut ui_transform) in label_query.iter_mut() {
             if label.0 == fulfilling_entity {
-                transform.scale = scale_vec;
+                ui_transform.scale = Vec2::splat(scale);
             }
         }
     }
@@ -1013,50 +1052,82 @@ fn update_sphere_effects(
 fn update_matrix_particles(
     mut commands: Commands,
     time: Res<Time>,
-    mut particle_query: Query<(
-        Entity,
-        &mut Transform,
-        &mut MatrixParticle,
-        &mut Sprite,
-        &mut Visibility,
-    )>,
+    mut particle_query: Query<(Entity, &mut Transform, &mut MatrixParticle)>,
 ) {
-    for (entity, mut transform, mut particle, mut sprite, mut visibility) in
-        particle_query.iter_mut()
-    {
+    for (entity, mut transform, mut particle) in particle_query.iter_mut() {
         particle.lifetime.tick(time.delta());
         if particle.lifetime.is_finished() {
             commands.entity(entity).despawn();
         } else {
-            // Make particle visible after layout is computed (avoids flashing at origin)
-            if *visibility == Visibility::Hidden {
-                *visibility = Visibility::Inherited;
-            }
             // Apply velocity
             transform.translation += particle.velocity * time.delta_secs();
 
-            // Fade alpha based on remaining lifetime
-            let t = particle.lifetime.fraction();
-            let alpha = (1.0 - t).clamp(0.0, 1.0);
-
-            if let Color::LinearRgba(ref mut rgba) = sprite.color {
-                *rgba = LinearRgba::new(rgba.red, rgba.green, rgba.blue, alpha);
-            } else {
-                let to_rgba = sprite.color.to_linear();
-                sprite.color = Color::LinearRgba(LinearRgba::new(
-                    to_rgba.red,
-                    to_rgba.green,
-                    to_rgba.blue,
-                    alpha,
-                ));
-            }
+            // Shrink toward zero over the lifetime (shared-material stand-in for
+            // an alpha fade).
+            let fade = (1.0 - particle.lifetime.fraction()).clamp(0.0, 1.0);
+            let size = particle.base_size * fade;
+            transform.scale = Vec3::new(size.x, size.y, 1.0);
         }
+    }
+}
+
+/// Parameter ranges for one category of Matrix burst.
+struct BurstParams {
+    spread: f32,
+    vel_xz: f32,
+    vel_y: std::ops::Range<f32>,
+    width: std::ops::Range<f32>,
+    height: std::ops::Range<f32>,
+    lifetime: std::ops::Range<f32>,
+}
+
+fn spawn_matrix_burst(
+    commands: &mut Commands,
+    assets: &MatrixParticleAssets,
+    material: &Handle<StandardMaterial>,
+    cam_rotation: Quat,
+    position: Vec3,
+    num_particles: usize,
+    params: &BurstParams,
+) {
+    for _ in 0..num_particles {
+        let offset = Vec3::new(
+            rand::random_range(-params.spread..params.spread),
+            rand::random_range(-params.spread..params.spread),
+            rand::random_range(-params.spread..params.spread),
+        );
+        let vel = Vec3::new(
+            rand::random_range(-params.vel_xz..params.vel_xz),
+            rand::random_range(params.vel_y.clone()),
+            rand::random_range(-params.vel_xz..params.vel_xz),
+        );
+        let size = Vec2::new(
+            rand::random_range(params.width.clone()),
+            rand::random_range(params.height.clone()),
+        );
+        let lifetime = rand::random_range(params.lifetime.clone());
+
+        // Camera-facing unlit quads: 3D world-space particles. (These used to be
+        // `Sprite`s, which stopped rendering when the 2D overlay camera was removed.)
+        commands.spawn((
+            Mesh3d(assets.mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(position + offset)
+                .with_rotation(cam_rotation)
+                .with_scale(Vec3::new(size.x, size.y, 1.0)),
+            MatrixParticle {
+                velocity: vel,
+                lifetime: Timer::from_seconds(lifetime, TimerMode::Once),
+                base_size: size,
+            },
+        ));
     }
 }
 
 pub fn handle_placeholder_bursts(
     mut commands: Commands,
     effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
+    particle_assets: Option<Res<MatrixParticleAssets>>,
     mut merge_events: MessageReader<crate::game_state::MergeBurstEvent>,
     mut fulfill_events: MessageReader<crate::game_state::FulfillmentBurstEvent>,
     camera_query: Query<&GlobalTransform, With<Camera3d>>,
@@ -1064,12 +1135,32 @@ pub fn handle_placeholder_bursts(
     let is_effects_on = effects_mode
         .map(|m| *m == crate::game_state::VisualEffectsMode::On)
         .unwrap_or(true);
+    let Some(particle_assets) = particle_assets else {
+        return;
+    };
 
     let cam_rotation = camera_query
         .iter()
         .next()
         .map(|t| t.compute_transform().rotation)
         .unwrap_or(Quat::IDENTITY);
+
+    const MERGE_PARAMS: BurstParams = BurstParams {
+        spread: 0.5,
+        vel_xz: 0.5,
+        vel_y: -2.5..-1.0,
+        width: 0.03..0.06,
+        height: 0.12..0.22,
+        lifetime: 0.8..1.5,
+    };
+    const FULFILL_PARAMS: BurstParams = BurstParams {
+        spread: 0.8,
+        vel_xz: 0.8,
+        vel_y: -3.5..-1.5,
+        width: 0.04..0.08,
+        height: 0.15..0.28,
+        lifetime: 1.0..2.0,
+    };
 
     // Read merge events
     for event in merge_events.read() {
@@ -1078,38 +1169,15 @@ pub fn handle_placeholder_bursts(
             let num_particles = (5 + (event.tier as usize)).min(15);
             #[cfg(not(target_arch = "wasm32"))]
             let num_particles = 10 + (event.tier as usize) * 2;
-            for _ in 0..num_particles {
-                let offset = Vec3::new(
-                    rand::random_range(-0.5..0.5),
-                    rand::random_range(-0.5..0.5),
-                    rand::random_range(-0.5..0.5),
-                );
-                let pos = event.position + offset;
-
-                let vel = Vec3::new(
-                    rand::random_range(-0.5..0.5),
-                    rand::random_range(-2.5..-1.0),
-                    rand::random_range(-0.5..0.5),
-                );
-
-                let width = rand::random_range(0.03..0.06);
-                let height = rand::random_range(0.12..0.22);
-                let lifetime = rand::random_range(0.8..1.5);
-
-                commands.spawn((
-                    Sprite {
-                        color: Color::hsl(120.0, 0.95, 0.6),
-                        custom_size: Some(Vec2::new(width, height)),
-                        ..default()
-                    },
-                    Transform::from_translation(pos).with_rotation(cam_rotation),
-                    Visibility::Hidden,
-                    MatrixParticle {
-                        velocity: vel,
-                        lifetime: Timer::from_seconds(lifetime, TimerMode::Once),
-                    },
-                ));
-            }
+            spawn_matrix_burst(
+                &mut commands,
+                &particle_assets,
+                &particle_assets.merge_material,
+                cam_rotation,
+                event.position,
+                num_particles,
+                &MERGE_PARAMS,
+            );
         }
     }
 
@@ -1120,38 +1188,15 @@ pub fn handle_placeholder_bursts(
             let num_particles = (12 + (event.tier as usize) * 2).min(25);
             #[cfg(not(target_arch = "wasm32"))]
             let num_particles = 25 + (event.tier as usize) * 3;
-            for _ in 0..num_particles {
-                let offset = Vec3::new(
-                    rand::random_range(-0.8..0.8),
-                    rand::random_range(-0.8..0.8),
-                    rand::random_range(-0.8..0.8),
-                );
-                let pos = event.position + offset;
-
-                let vel = Vec3::new(
-                    rand::random_range(-0.8..0.8),
-                    rand::random_range(-3.5..-1.5),
-                    rand::random_range(-0.8..0.8),
-                );
-
-                let width = rand::random_range(0.04..0.08);
-                let height = rand::random_range(0.15..0.28);
-                let lifetime = rand::random_range(1.0..2.0);
-
-                commands.spawn((
-                    Sprite {
-                        color: Color::hsl(120.0, 0.95, 0.65),
-                        custom_size: Some(Vec2::new(width, height)),
-                        ..default()
-                    },
-                    Transform::from_translation(pos).with_rotation(cam_rotation),
-                    Visibility::Hidden,
-                    MatrixParticle {
-                        velocity: vel,
-                        lifetime: Timer::from_seconds(lifetime, TimerMode::Once),
-                    },
-                ));
-            }
+            spawn_matrix_burst(
+                &mut commands,
+                &particle_assets,
+                &particle_assets.fulfill_material,
+                cam_rotation,
+                event.position,
+                num_particles,
+                &FULFILL_PARAMS,
+            );
         }
     }
 }
@@ -1159,6 +1204,65 @@ pub fn handle_placeholder_bursts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reimplements the forward `curve()` from `assets/shaders/crt_post_process.wgsl`
+    /// (output pixel -> source sample position) for verification.
+    fn shader_curve(uv: Vec2) -> Vec2 {
+        let mut u = uv - Vec2::splat(0.5);
+        let bend = Vec2::new(3.8, 3.8);
+        u.x *= 1.0 + (u.y * u.y) / bend.x;
+        u.y *= 1.0 + (u.x * u.x) / bend.y;
+        u + Vec2::splat(0.5)
+    }
+
+    #[test]
+    fn test_crt_screen_position_inverts_shader_curve() {
+        // For any source position p, the label is placed at q = crt_screen_position(p).
+        // The shader shows source point p at the output pixel q satisfying curve(q) = p,
+        // so curve(q) must round-trip back to p exactly.
+        let win = Vec2::new(800.0, 600.0);
+        for &(x, y) in &[
+            (400.0, 300.0), // center
+            (100.0, 500.0), // bottom-left (launcher area)
+            (700.0, 500.0), // bottom-right
+            (50.0, 50.0),   // far corner
+            (400.0, 550.0), // bottom-center
+            (240.0, 480.0),
+        ] {
+            let p = Vec2::new(x, y);
+            let q = crt_screen_position(p, win);
+            let round_trip = shader_curve(q / win) * win;
+            assert!(
+                (round_trip - p).length() < 1e-3,
+                "curve(crt_screen_position({p:?})) = {round_trip:?}, expected {p:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_crt_screen_position_pulls_toward_center() {
+        // The CRT shader compresses the scene toward screen center, so the corrected
+        // label position must sit between the raw projection and the center — never
+        // outside it. (The original bug applied the curve forward, pushing labels
+        // *away* from center, which made them drift off laterally with the ball.)
+        let win = Vec2::new(800.0, 600.0);
+        let center = win * 0.5;
+
+        // A ball on the launcher line, left of center.
+        let p = Vec2::new(200.0, 510.0);
+        let q = crt_screen_position(p, win);
+        assert!(
+            q.x > p.x && q.x < center.x,
+            "expected corrected x between raw ({}) and center ({}), got {}",
+            p.x,
+            center.x,
+            q.x
+        );
+
+        // Dead-center stays put.
+        let q_center = crt_screen_position(center, win);
+        assert!((q_center - center).length() < 1e-4);
+    }
 
     #[test]
     fn test_label_projection() {

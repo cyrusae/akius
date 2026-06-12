@@ -50,8 +50,6 @@ impl Plugin for LauncherPlugin {
 
 /// Updates the aiming position by raycasting the screen cursor coordinates onto the Y=0 plane
 /// and constraining the X coordinate to prevent the preview sphere from overlapping existing spheres.
-/// Updates the aiming position by raycasting the screen cursor coordinates onto the Y=0 plane
-/// and constraining the X coordinate to prevent the preview sphere from overlapping existing spheres.
 /// Also handles A/D and Left/Right keyboard movement as alternative inputs.
 pub fn update_launcher_aiming(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -66,6 +64,9 @@ pub fn update_launcher_aiming(
     keyboard: Res<ButtonInput<KeyCode>>,
     touches: Res<Touches>,
     time: Res<Time>,
+    // Scratch buffers reused across frames to avoid per-frame heap allocations.
+    mut intervals: Local<Vec<(f32, f32)>>,
+    mut merged_intervals: Local<Vec<(f32, f32)>>,
 ) {
     let half_width = settings.arena_width * 0.5;
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
@@ -143,7 +144,7 @@ pub fn update_launcher_aiming(
     }
 
     // Compute 1D forbidden intervals on the launcher line (Z = settings.launcher_z)
-    let mut intervals: Vec<(f32, f32)> = Vec::new();
+    intervals.clear();
     for (sphere_transform, sphere, velocity) in sphere_query.iter() {
         if let Some(vel) = velocity {
             if vel.linear.z < -0.5 {
@@ -165,8 +166,8 @@ pub fn update_launcher_aiming(
 
     // Merge overlapping intervals
     intervals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let mut merged_intervals: Vec<(f32, f32)> = Vec::new();
-    for interval in intervals {
+    merged_intervals.clear();
+    for &interval in intervals.iter() {
         if let Some(last) = merged_intervals.last_mut() {
             if interval.0 <= last.1 {
                 last.1 = last.1.max(interval.1);
@@ -180,7 +181,7 @@ pub fn update_launcher_aiming(
 
     // Adjust target X if it lies within a forbidden interval.
     // Snap only to options that are within the [-limit_x, limit_x] table boundaries.
-    for (a, b) in merged_intervals {
+    for &(a, b) in merged_intervals.iter() {
         if clamped_x > a && clamped_x < b {
             let left_valid = a >= -limit_x;
             let right_valid = b <= limit_x;
@@ -215,15 +216,20 @@ pub fn check_launcher_obstructions(
     mut launcher_state: ResMut<LauncherState>,
     rapier_context: ReadRapierContext,
     sphere_query: Query<&Sphere>,
+    // Cache the query shape per tier instead of heap-allocating a new Rapier
+    // collider every frame.
+    mut cached_shape: Local<Option<(u8, Collider)>>,
 ) {
     let Ok(context) = rapier_context.single() else {
         return;
     };
 
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
-    let radius = crate::core_math::get_radius(current_tier);
-    let collider = Collider::ball(radius);
-    let shape = &*collider.raw;
+    if cached_shape.as_ref().map(|(tier, _)| *tier) != Some(current_tier) {
+        let radius = crate::core_math::get_radius(current_tier);
+        *cached_shape = Some((current_tier, Collider::ball(radius)));
+    }
+    let shape = &*cached_shape.as_ref().unwrap().1.raw;
 
     let position = Vec3::new(launcher_state.active_x, 0.0, settings.launcher_z);
 

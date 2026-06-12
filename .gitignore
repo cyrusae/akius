@@ -23,3 +23,5 @@ target
 .antigravitycli
 .claude
 dist/
+# Stray tool output
+cargo_check.log

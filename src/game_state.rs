@@ -136,7 +136,14 @@ pub fn check_order_fulfillment(
     mut fulfillment: ResMut<ActiveFulfillment>,
     sphere_query: Query<
         (Entity, &Sphere),
-        (Without<crate::physics::MergeCooldown>, Without<Fulfilling>),
+        (
+            Without<crate::physics::MergeCooldown>,
+            // Merged parents keep `Sphere` during their despawn-delay window;
+            // without this filter, fulfillment could latch onto an entity that is
+            // about to be despawned, stalling the order pipeline for a full timer.
+            Without<crate::physics::DespawnDelay>,
+            Without<Fulfilling>,
+        ),
     >,
     all_spheres: Query<&Transform, With<Sphere>>,
     mut fulfillment_burst_events: MessageWriter<FulfillmentBurstEvent>,
@@ -245,6 +252,59 @@ pub enum VisualEffectsMode {
     Off,
 }
 
+/// Automatically switches visual effects off when the frame rate stays poor for
+/// a sustained period during gameplay. The CRT pass plus alpha-blended sphere
+/// shells are the dominant GPU cost, and a full board (high-score territory) is
+/// the worst case — on weak GPUs this is the difference between a slowdown and
+/// the browser killing the tab.
+///
+/// Fires at most once per session so it never fights a player who manually
+/// re-enables FX afterward (F key or the FX button).
+pub fn auto_degrade_visual_effects(
+    time: Res<Time>,
+    state: Res<State<AppState>>,
+    mut effects_mode: ResMut<VisualEffectsMode>,
+    mut over_budget: Local<f32>,
+    mut already_fired: Local<bool>,
+) {
+    /// Frame-time budget: anything slower than 30 FPS counts as over budget.
+    const FRAME_BUDGET: f32 = 1.0 / 30.0;
+    /// Cumulative seconds of over-budget frames required to trigger.
+    const TRIGGER_AFTER: f32 = 3.0;
+
+    if *already_fired || *effects_mode == VisualEffectsMode::Off {
+        return;
+    }
+    if *state.get() != AppState::InGame {
+        return;
+    }
+
+    let dt = time.delta_secs();
+    // Ignore one-off giant deltas (tab switch, window drag, shader-compile hitch)
+    // so they can't trip the detector on their own.
+    if dt > 1.0 {
+        return;
+    }
+
+    if dt > FRAME_BUDGET {
+        // Cap each frame's contribution so a few isolated spikes don't add up
+        // as fast as genuinely sustained slowness.
+        *over_budget += dt.min(0.1);
+    } else {
+        // Recover while the frame rate is healthy.
+        *over_budget = (*over_budget - dt).max(0.0);
+    }
+
+    if *over_budget >= TRIGGER_AFTER {
+        *effects_mode = VisualEffectsMode::Off;
+        *already_fired = true;
+        info!(
+            "Sustained low frame rate detected — visual effects disabled automatically \
+             (press F or the FX button to re-enable)."
+        );
+    }
+}
+
 #[derive(Message, Debug, Clone, Copy)]
 pub struct MergeBurstEvent {
     pub position: Vec3,
@@ -288,17 +348,93 @@ pub fn load_high_score_from_local_storage() -> u32 {
     0
 }
 
-pub fn update_high_score(score: Res<Score>, mut high_score: ResMut<HighScore>) {
+/// Minimum interval between localStorage writes while the high score keeps climbing.
+const HIGH_SCORE_SAVE_INTERVAL: f32 = 5.0;
+
+/// Tracks the in-memory high score every frame, but throttles the synchronous
+/// localStorage write: once a player passes their previous best, *every* merge
+/// raises the high score, and a blocking storage write per merge causes jank at
+/// exactly the moment the game is busiest. `flush_high_score` guarantees the
+/// final value is persisted on game over / win.
+pub fn update_high_score(
+    time: Res<Time>,
+    score: Res<Score>,
+    mut high_score: ResMut<HighScore>,
+    mut dirty: Local<bool>,
+    mut next_save_at: Local<f32>,
+) {
     if score.total > high_score.0 {
         high_score.0 = score.total;
-        save_high_score_to_local_storage(high_score.0);
+        *dirty = true;
     }
+    if *dirty && time.elapsed_secs() >= *next_save_at {
+        save_high_score_to_local_storage(high_score.0);
+        *dirty = false;
+        *next_save_at = time.elapsed_secs() + HIGH_SCORE_SAVE_INTERVAL;
+    }
+}
+
+/// Persists the high score immediately. Run on entering GameOver/Win so the
+/// throttling in `update_high_score` can never lose the final value.
+pub fn flush_high_score(high_score: Res<HighScore>) {
+    save_high_score_to_local_storage(high_score.0);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    fn auto_degrade_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(VisualEffectsMode::On);
+        app.add_systems(Update, auto_degrade_visual_effects);
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update();
+        app
+    }
+
+    fn run_frames(app: &mut App, frames: usize, dt: f32) {
+        for _ in 0..frames {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_secs_f32(dt));
+            app.update();
+        }
+    }
+
+    #[test]
+    fn test_auto_degrade_fires_on_sustained_slowness() {
+        let mut app = auto_degrade_test_app();
+        // 25 FPS (40 ms frames) for ~4.4 seconds of game time
+        run_frames(&mut app, 110, 0.04);
+        assert_eq!(
+            *app.world().resource::<VisualEffectsMode>(),
+            VisualEffectsMode::Off
+        );
+    }
+
+    #[test]
+    fn test_auto_degrade_ignores_healthy_and_spiky_frames() {
+        let mut app = auto_degrade_test_app();
+        // Healthy 60 FPS frames never trigger it
+        run_frames(&mut app, 600, 1.0 / 60.0);
+        assert_eq!(
+            *app.world().resource::<VisualEffectsMode>(),
+            VisualEffectsMode::On
+        );
+        // A handful of giant deltas (tab switches) don't trigger it either
+        run_frames(&mut app, 5, 5.0);
+        assert_eq!(
+            *app.world().resource::<VisualEffectsMode>(),
+            VisualEffectsMode::On
+        );
+    }
 
     #[test]
     fn test_loss_condition_grace_period() {

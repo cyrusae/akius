@@ -4,7 +4,56 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = { version = "0.18.1", features = ["wayland", "x11"] }
+# Explicit feature list instead of Bevy's defaults: the defaults pull in glTF,
+# scenes, skeletal animation, gizmos, gamepad, picking, sprites, and several
+# image/audio formats this game never touches — dead weight in the wasm binary.
+# When upgrading Bevy, re-check this list against the new release's feature set.
+bevy = { version = "0.18.1", default-features = false, features = [
+    # App core / platform
+    "std",
+    "async_executor",
+    "multi_threaded",
+    "bevy_log",
+    "bevy_asset",
+    "bevy_state",
+    "bevy_window",
+    "bevy_winit",
+    "bevy_input_focus",
+    "keyboard",
+    "mouse",
+    "touch",
+    # Native windowing
+    "x11",
+    "wayland",
+    # Web rendering backend (WebGL2 reaches far more devices than WebGPU)
+    "webgl2",
+    # 3D rendering
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_light",
+    "bevy_post_process",
+    "bevy_camera",
+    "bevy_color",
+    "bevy_mesh",
+    "bevy_shader",
+    "bevy_image",
+    "png",
+    # Required by Bevy's default tonemapping (missing these fails at *runtime*)
+    "tonemapping_luts",
+    "ktx2",
+    "zstd_rust",
+    # UI + text
+    "bevy_ui",
+    "bevy_ui_render",
+    "bevy_text",
+    "default_font",
+    # Audio: not used yet, kept so adding sound effects later Just Works.
+    # Decoders: vorbis (.ogg) + wav cover most CC-0 sound packs.
+    "bevy_audio",
+    "vorbis",
+    "wav",
+] }
 bevy_rapier3d = { version = "0.34.0", default-features = false, features = ["dim3", "simd-stable"] }
 bevy_mesh = "0.18.1"
 rand = "0.9"
