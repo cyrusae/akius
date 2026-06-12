@@ -33,6 +33,7 @@ impl Plugin for PhysicsPlugin {
                 (
                     (detect_collisions, check_distance_merges),
                     resolve_merges,
+                    dampen_rebound_velocity,
                     tick_merge_cooldowns,
                     spill_spheres,
                 )
@@ -300,6 +301,26 @@ pub fn tick_merge_cooldowns(
 }
 
 /// Dampens positive Z-velocity (upward movement towards the player)
+/// using an intensifying gradient that starts at the 1/10-1/8 mark of the board.
+pub fn dampen_rebound_velocity(
+    mut query: Query<(&Transform, &mut Velocity), With<Sphere>>,
+    settings: Res<crate::game_state::GameSettings>,
+) {
+    let launcher_z = settings.launcher_z;
+    let depth = settings.arena_depth;
+    let z_start = launcher_z - depth * 0.9; // starts at 10% from the back wall (e.g. -0.6 with default settings)
+    let range = depth * 0.8; // intensifies over 80% of the board (e.g. 11.2 with default settings)
+
+    for (transform, mut velocity) in query.iter_mut() {
+        if velocity.linear.z > 0.0 && transform.translation.z > z_start {
+            let t = ((transform.translation.z - z_start) / range).clamp(0.0, 1.0);
+            // Damping factor starts at 1.0 (no damping) and drops to 0.60 (very heavy damping) at the launcher
+            let damping = 1.0 - t * 0.40;
+            velocity.linear.z *= damping;
+        }
+    }
+}
+
 /// Unlocks the Y-translation and all rotations for spheres that go past Z > settings.launcher_z
 /// during gameplay so they visually roll and fall off the edge of the table.
 pub fn spill_spheres(
@@ -820,5 +841,83 @@ mod tests {
             "Leaked entities found! Baseline: {}, Final: {}",
             baseline_count, final_count
         );
+    }
+
+    #[test]
+    fn test_dampen_rebound_velocity() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(crate::game_state::GameSettings {
+            launcher_z: 12.0,
+            arena_depth: 14.0,
+            ..default()
+        });
+        app.add_systems(Update, dampen_rebound_velocity);
+
+        // Spawn a sphere moving towards the player (+Z) from Z = 5.0 (well within the damping zone)
+        let entity_damping = app
+            .world_mut()
+            .spawn((
+                Sphere { tier: 1 },
+                Transform::from_xyz(0.0, 0.0, 5.0),
+                Velocity {
+                    linear: Vec3::new(0.0, 0.0, 10.0),
+                    angular: Vec3::ZERO,
+                },
+            ))
+            .id();
+
+        // Spawn a sphere moving away from the player (-Z) from Z = 5.0
+        let entity_no_damping_dir = app
+            .world_mut()
+            .spawn((
+                Sphere { tier: 1 },
+                Transform::from_xyz(0.0, 0.0, 5.0),
+                Velocity {
+                    linear: Vec3::new(0.0, 0.0, -10.0),
+                    angular: Vec3::ZERO,
+                },
+            ))
+            .id();
+
+        // Spawn a sphere moving towards the player (+Z) from Z = -1.5 (behind the damping start Z_start = -0.6)
+        let entity_no_damping_pos = app
+            .world_mut()
+            .spawn((
+                Sphere { tier: 1 },
+                Transform::from_xyz(0.0, 0.0, -1.5),
+                Velocity {
+                    linear: Vec3::new(0.0, 0.0, 10.0),
+                    angular: Vec3::ZERO,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        // Verify entity_damping has reduced positive Z velocity
+        let vel_damping = app
+            .world()
+            .entity(entity_damping)
+            .get::<Velocity>()
+            .unwrap();
+        assert!(vel_damping.linear.z < 10.0);
+        assert!(vel_damping.linear.z > 0.0);
+
+        // Verify entity_no_damping_dir has unchanged negative Z velocity
+        let vel_no_damping_dir = app
+            .world()
+            .entity(entity_no_damping_dir)
+            .get::<Velocity>()
+            .unwrap();
+        assert_eq!(vel_no_damping_dir.linear.z, -10.0);
+
+        // Verify entity_no_damping_pos has unchanged positive Z velocity because it is before the damping zone starts
+        let vel_no_damping_pos = app
+            .world()
+            .entity(entity_no_damping_pos)
+            .get::<Velocity>()
+            .unwrap();
+        assert_eq!(vel_no_damping_pos.linear.z, 10.0);
     }
 }
