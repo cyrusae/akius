@@ -1,11 +1,8 @@
 #import bevy_pbr::forward_io::VertexOutput
+#import bevy_pbr::mesh_view_bindings::globals
 
 struct LaserUniforms {
     color: vec4<f32>,
-    time: f32,
-    _padding1: f32,
-    _padding2: f32,
-    _padding3: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> uniforms: LaserUniforms;
@@ -26,7 +23,7 @@ fn fragment(
     var rgb = uniforms.color.rgb * falloff * 0.8;
     
     // Directional chevron pulses moving forward
-    let wave = sin(uv.y * 40.0 - uniforms.time * 15.0);
+    let wave = sin(uv.y * 40.0 - globals.time * 15.0);
     let pulse = max(wave, 0.0) * 0.25;
     
     // Apply pulse glow boost
