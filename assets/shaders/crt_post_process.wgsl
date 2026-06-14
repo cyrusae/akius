@@ -4,7 +4,7 @@ struct CrtSettings {
     time: f32,
     aspect_ratio: f32,
     glitch_intensity: f32,
-    _padding: f32,
+    effects_enabled: f32,
 }
 
 @group(0) @binding(0) var screen_texture: texture_2d<f32>;
@@ -23,6 +23,10 @@ fn curve(uv: vec2<f32>) -> vec2<f32> {
 
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    // If visual effects are disabled, bypass the shader entirely and return the raw screen pixel
+    if (settings.effects_enabled < 0.5) {
+        return textureSample(screen_texture, texture_sampler, in.uv);
+    }
     // Sanitize uniform settings to protect against NaN or uninitialized/corrupted buffer memory
     var intensity = settings.glitch_intensity;
     if (intensity < 0.0 || intensity > 1.0 || !(intensity >= 0.0 || intensity <= 1.0)) {
