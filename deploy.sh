@@ -6,8 +6,11 @@ echo "=========================================="
 echo "Starting deploy: building release..."
 echo "=========================================="
 
-# Build release artifacts using trunk
-trunk build --release
+# Clean previous build artifacts to prevent build pipeline cache errors
+trunk clean
+
+# Build release artifacts using trunk with public-url set to the repo subdirectory
+trunk build --release --public-url "/akius/"
 
 echo "=========================================="
 echo "Publishing to GitHub Pages..."

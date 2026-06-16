@@ -780,6 +780,59 @@ fn spawn_main_menu_screen(mut commands: Commands, asset_server: Res<AssetServer>
                         TextColor(Color::WHITE),
                     ));
                 });
+
+            // Instructions Box
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Px(500.0),
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::FlexStart,
+                        border: UiRect::all(Val::Px(2.0)),
+                        padding: UiRect::all(Val::Px(15.0)),
+                        margin: UiRect::top(Val::Px(15.0)),
+                        row_gap: Val::Px(8.0),
+                        ..default()
+                    },
+                    BorderColor::all(Color::srgb(0.2, 0.6, 0.4)), // Muted green border
+                    BackgroundColor(Color::srgba(0.02, 0.05, 0.03, 0.90)), // Dark terminal tint
+                ))
+                .with_children(|box_parent| {
+                    box_parent.spawn((
+                        Text::new("--- TELEMETRY / INSTRUCTION MANUAL ---"),
+                        TextFont {
+                            font: font_handle.clone(),
+                            font_size: 15.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.2, 0.9, 0.6)), // Bright phosphor green
+                        Node {
+                            margin: UiRect::bottom(Val::Px(4.0)),
+                            ..default()
+                        },
+                    ));
+
+                    let instructions = [
+                        "[AIM]     Move cursor or press A/D (Arrows) to slide",
+                        "[LAUNCH]  Click left mouse button or press SPACE to shoot",
+                        "[MERGE]   Collide same-tier spheres to combine & upgrade",
+                        "[FULFILL] Reach target tier [TRG] to complete orders",
+                        "[HAZARD]  Avoid overflow past launcher or table spill",
+                    ];
+
+                    for inst in instructions {
+                        box_parent.spawn((
+                            Text::new(inst),
+                            TextFont {
+                                font: font_handle.clone(),
+                                font_size: 13.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.7, 0.9, 0.8)), // Muted terminal text
+                        ));
+                    }
+                });
         });
 }
 

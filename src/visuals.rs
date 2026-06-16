@@ -293,8 +293,8 @@ impl Plugin for VisualPlugin {
                     update_aim_guide_line,
                     update_targeting_reticle
                         .after(crate::launcher::update_launcher_preview_visuals),
-                    animate_merged_spawns,
-                    animate_fulfilling_spheres,
+                    animate_merged_spawns.after(update_sphere_effects),
+                    animate_fulfilling_spheres.after(update_sphere_effects),
                     cleanup_orphaned_labels,
                     handle_placeholder_bursts,
                     update_matrix_particles,
@@ -982,26 +982,40 @@ pub fn compute_fulfillment_scale(elapsed: f32, duration: f32) -> f32 {
 }
 
 pub fn animate_merged_spawns(
+    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
     cooldown_query: Query<&crate::physics::MergeCooldown>,
     fulfilling_query: Query<&crate::game_state::Fulfilling>,
-    mut visual_query: Query<(&ChildOf, &mut Transform), Or<(With<SphereVisual>, With<SphereCore>)>>,
+    mut visual_query: Query<(Entity, &ChildOf, &mut Transform, Option<&SphereCore>), Or<(With<SphereVisual>, With<SphereCore>)>>,
     // Labels are UI nodes: in Bevy 0.18 they carry `UiTransform`, not `Transform`.
     mut label_query: Query<(&BillboardLabel, &mut UiTransform)>,
 ) {
-    for (child_of, mut transform) in visual_query.iter_mut() {
+    let is_effects_on = effects_mode
+        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .unwrap_or(true);
+
+    for (_entity, child_of, mut transform, opt_core) in visual_query.iter_mut() {
         let parent = child_of.0;
         if fulfilling_query.contains(parent) {
             continue; // Skip fulfilling spheres
         }
+        let base_scale = if !is_effects_on && opt_core.is_some() {
+            1.53846
+        } else {
+            1.0
+        };
         if let Ok(cooldown) = cooldown_query.get(parent) {
             let scale = compute_merge_scale(
                 cooldown.timer.elapsed_secs(),
                 cooldown.timer.duration().as_secs_f32(),
             );
-            transform.scale = Vec3::splat(scale);
+            let target_scale = Vec3::splat(scale * base_scale);
+            if transform.scale != target_scale {
+                transform.scale = target_scale;
+            }
         } else {
-            if transform.scale != Vec3::ONE {
-                transform.scale = Vec3::ONE;
+            let target_scale = Vec3::splat(base_scale);
+            if transform.scale != target_scale {
+                transform.scale = target_scale;
             }
         }
     }
@@ -1023,23 +1037,36 @@ pub fn animate_merged_spawns(
 }
 
 pub fn animate_fulfilling_spheres(
+    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
     fulfillment: Option<Res<crate::game_state::ActiveFulfillment>>,
-    mut visual_query: Query<(&ChildOf, &mut Transform), Or<(With<SphereVisual>, With<SphereCore>)>>,
+    mut visual_query: Query<(&ChildOf, &mut Transform, Option<&SphereCore>), Or<(With<SphereVisual>, With<SphereCore>)>>,
     // Labels are UI nodes: in Bevy 0.18 they carry `UiTransform`, not `Transform`.
     mut label_query: Query<(&BillboardLabel, &mut UiTransform)>,
 ) {
     let Some(fulfillment) = fulfillment else {
         return;
     };
+    let is_effects_on = effects_mode
+        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .unwrap_or(true);
+
     if let Some(fulfilling_entity) = fulfillment.entity {
         let scale = compute_fulfillment_scale(
             fulfillment.timer.elapsed_secs(),
             fulfillment.timer.duration().as_secs_f32(),
         );
 
-        for (child_of, mut transform) in visual_query.iter_mut() {
+        for (child_of, mut transform, opt_core) in visual_query.iter_mut() {
             if child_of.0 == fulfilling_entity {
-                transform.scale = Vec3::splat(scale);
+                let base_scale = if !is_effects_on && opt_core.is_some() {
+                    1.53846
+                } else {
+                    1.0
+                };
+                let target_scale = Vec3::splat(scale * base_scale);
+                if transform.scale != target_scale {
+                    transform.scale = target_scale;
+                }
             }
         }
         for (label, mut ui_transform) in label_query.iter_mut() {
@@ -1075,20 +1102,36 @@ pub fn cleanup_launcher_visuals(
 
 fn update_sphere_effects(
     effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
-    mut core_query: Query<&mut Visibility, With<SphereCore>>,
+    mut core_query: Query<(&mut Visibility, &mut Transform), With<SphereCore>>,
+    mut outer_query: Query<&mut Visibility, (Or<(With<SphereVisual>, With<LauncherPreview>)>, Without<SphereCore>)>,
 ) {
     let is_effects_on = effects_mode
         .map(|m| *m == crate::game_state::VisualEffectsMode::On)
         .unwrap_or(true);
 
-    let target_vis = if is_effects_on {
+    // 1. Update outer shells (wireframes)
+    let outer_vis = if is_effects_on {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
+    for mut vis in outer_query.iter_mut() {
+        crate::utils::set_visibility(&mut vis, outer_vis);
+    }
 
-    for mut vis in core_query.iter_mut() {
-        crate::utils::set_visibility(&mut vis, target_vis);
+    // 2. Update nested cores (solid cores)
+    let core_vis = Visibility::Inherited;
+    let core_scale = if is_effects_on {
+        Vec3::splat(1.0)
+    } else {
+        Vec3::splat(1.53846)
+    };
+
+    for (mut vis, mut transform) in core_query.iter_mut() {
+        crate::utils::set_visibility(&mut vis, core_vis);
+        if transform.scale != core_scale {
+            transform.scale = core_scale;
+        }
     }
 }
 

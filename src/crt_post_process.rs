@@ -20,7 +20,7 @@ pub struct CrtPostProcessSettings {
     pub time: f32,
     pub aspect_ratio: f32,
     pub glitch_intensity: f32,
-    pub _padding: f32,
+    pub effects_enabled: f32, // 1.0 = enabled, 0.0 = bypassed
 }
 
 impl FullscreenMaterial for CrtPostProcessSettings {
@@ -82,29 +82,21 @@ fn update_crt_settings(
         *glitch_val = 1.0;
     }
 
+    let enabled_val = if is_effects_on { 1.0 } else { 0.0 };
+
     for (entity, settings) in camera_query.iter_mut() {
-        match (is_effects_on, settings) {
-            // Steady state: mutate the existing component in place instead of
-            // re-inserting it through Commands every frame.
-            (true, Some(mut settings)) => {
-                settings.time = time.elapsed_secs();
-                settings.aspect_ratio = aspect_ratio;
-                settings.glitch_intensity = *glitch_val;
-            }
-            // FX just turned on (or first frame): attach the component.
-            (true, None) => {
-                commands.entity(entity).insert(CrtPostProcessSettings {
-                    time: time.elapsed_secs(),
-                    aspect_ratio,
-                    glitch_intensity: *glitch_val,
-                    _padding: 0.0,
-                });
-            }
-            // FX just turned off: detach. No-op once already removed.
-            (false, Some(_)) => {
-                commands.entity(entity).remove::<CrtPostProcessSettings>();
-            }
-            (false, None) => {}
+        if let Some(mut settings) = settings {
+            settings.time = time.elapsed_secs();
+            settings.aspect_ratio = aspect_ratio;
+            settings.glitch_intensity = *glitch_val;
+            settings.effects_enabled = enabled_val;
+        } else {
+            commands.entity(entity).insert(CrtPostProcessSettings {
+                time: time.elapsed_secs(),
+                aspect_ratio,
+                glitch_intensity: *glitch_val,
+                effects_enabled: enabled_val,
+            });
         }
     }
 }
