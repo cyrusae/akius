@@ -3,7 +3,25 @@ use crate::visuals::TIER_COLORS;
 use bevy::prelude::*;
 
 #[derive(Component)]
-pub struct ScoreText;
+pub struct CurrentScoreText;
+
+#[derive(Component)]
+pub struct HighScoreText;
+
+#[derive(Component)]
+pub struct HudTopRow;
+
+#[derive(Component)]
+pub struct HudBottomRow;
+
+#[derive(Component)]
+pub struct HudLeftCol;
+
+#[derive(Component)]
+pub struct HudCenterCol;
+
+#[derive(Component)]
+pub struct HudRightCol;
 
 #[derive(Component)]
 pub struct TargetSpherePreviewText;
@@ -67,6 +85,7 @@ impl Plugin for HudPlugin {
                     update_aim_guide_button_text,
                     handle_effects_button,
                     update_effects_button_text,
+                    responsive_hud_layout,
                 ),
             )
             .add_systems(
@@ -116,22 +135,28 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
         .with_children(|parent| {
             // Top row
             parent
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
+                .spawn((
+                    HudTopRow,
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                ))
                 .with_children(|top_row| {
                     // Left wrapper (33.333%)
                     top_row
-                        .spawn(Node {
-                            width: Val::Percent(33.333),
-                            justify_content: JustifyContent::FlexStart,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        })
+                        .spawn((
+                            HudLeftCol,
+                            Node {
+                                width: Val::Percent(33.333),
+                                justify_content: JustifyContent::FlexStart,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                        ))
                         .with_children(|left_col| {
                             // Score panel (Top-left)
                             left_col
@@ -144,6 +169,12 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                             Val::Px(10.0),
                                         ),
                                         border: UiRect::all(Val::Px(2.0)),
+                                        flex_direction: FlexDirection::Row,
+                                        flex_wrap: FlexWrap::Wrap,
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        column_gap: Val::Px(20.0),
+                                        row_gap: Val::Px(5.0),
                                         ..default()
                                     },
                                     BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
@@ -151,11 +182,21 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 ))
                                 .with_children(|score_panel| {
                                     score_panel.spawn((
-                                        ScoreText,
-                                        Text::new("Score: 000000  HI: 000000"),
+                                        CurrentScoreText,
+                                        Text::new("Score: 000000"),
                                         TextFont {
                                             font: font_handle.clone(),
-                                            font_size: 24.0,
+                                            font_size: 28.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::WHITE),
+                                    ));
+                                    score_panel.spawn((
+                                        HighScoreText,
+                                        Text::new("HI: 000000"),
+                                        TextFont {
+                                            font: font_handle.clone(),
+                                            font_size: 28.0,
                                             ..default()
                                         },
                                         TextColor(Color::WHITE),
@@ -165,12 +206,15 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
 
                     // Center wrapper (33.333%)
                     top_row
-                        .spawn(Node {
-                            width: Val::Percent(33.333),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        })
+                        .spawn((
+                            HudCenterCol,
+                            Node {
+                                width: Val::Percent(33.333),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                        ))
                         .with_children(|center_col| {
                             // Target Order panel (Top-center)
                             center_col
@@ -196,7 +240,7 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                         Text::new("Target:"),
                                         TextFont {
                                             font: font_handle.clone(),
-                                            font_size: 20.0,
+                                            font_size: 24.0,
                                             ..default()
                                         },
                                         TextColor(Color::WHITE),
@@ -207,9 +251,9 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                         .spawn((
                                             TargetSpherePreviewSwatch,
                                             Node {
-                                                width: Val::Px(24.0),
-                                                height: Val::Px(24.0),
-                                                border_radius: BorderRadius::all(Val::Px(12.0)),
+                                                width: Val::Px(30.0),
+                                                height: Val::Px(30.0),
+                                                border_radius: BorderRadius::all(Val::Px(15.0)),
                                                 justify_content: JustifyContent::Center,
                                                 align_items: AlignItems::Center,
                                                 ..default()
@@ -222,7 +266,7 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                                 Text::new(""),
                                                 TextFont {
                                                     font: font_handle.clone(),
-                                                    font_size: 16.0,
+                                                    font_size: 20.0,
                                                     ..default()
                                                 },
                                                 TextColor(Color::WHITE),
@@ -233,12 +277,15 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
 
                     // Right wrapper (33.333%)
                     top_row
-                        .spawn(Node {
-                            width: Val::Percent(33.333),
-                            justify_content: JustifyContent::FlexEnd,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        })
+                        .spawn((
+                            HudRightCol,
+                            Node {
+                                width: Val::Percent(33.333),
+                                justify_content: JustifyContent::FlexEnd,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                        ))
                         .with_children(|right_col| {
                             // Next sphere preview panel (Top-right)
                             right_col
@@ -264,7 +311,7 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                         Text::new("Next:"),
                                         TextFont {
                                             font: font_handle.clone(),
-                                            font_size: 20.0,
+                                            font_size: 24.0,
                                             ..default()
                                         },
                                         TextColor(Color::WHITE),
@@ -275,9 +322,9 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                         .spawn((
                                             NextSpherePreviewSwatch,
                                             Node {
-                                                width: Val::Px(24.0),
-                                                height: Val::Px(24.0),
-                                                border_radius: BorderRadius::all(Val::Px(12.0)),
+                                                width: Val::Px(30.0),
+                                                height: Val::Px(30.0),
+                                                border_radius: BorderRadius::all(Val::Px(15.0)),
                                                 justify_content: JustifyContent::Center,
                                                 align_items: AlignItems::Center,
                                                 ..default()
@@ -290,7 +337,7 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                                 Text::new(""),
                                                 TextFont {
                                                     font: font_handle.clone(),
-                                                    font_size: 16.0,
+                                                    font_size: 20.0,
                                                     ..default()
                                                 },
                                                 TextColor(Color::WHITE),
@@ -302,14 +349,17 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
 
             // Bottom row
             parent
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::FlexEnd,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(15.0),
-                    ..default()
-                })
+                .spawn((
+                    HudBottomRow,
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::FlexEnd,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(15.0),
+                        ..default()
+                    },
+                ))
                 .with_children(|bottom_row| {
                     // Aim Guide button
                     bottom_row
@@ -317,8 +367,8 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                             AimGuideButton,
                             Button,
                             Node {
-                                width: Val::Px(160.0),
-                                height: Val::Px(45.0),
+                                width: Val::Px(180.0),
+                                height: Val::Px(50.0),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 border: UiRect::all(Val::Px(2.0)),
@@ -333,7 +383,7 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 Text::new("Aim Line: ON"),
                                 TextFont {
                                     font: font_handle.clone(),
-                                    font_size: 16.0,
+                                    font_size: 18.0,
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -346,8 +396,8 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                             EffectsButton,
                             Button,
                             Node {
-                                width: Val::Px(160.0),
-                                height: Val::Px(45.0),
+                                width: Val::Px(180.0),
+                                height: Val::Px(50.0),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 border: UiRect::all(Val::Px(2.0)),
@@ -362,7 +412,7 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 Text::new("FX: ON"),
                                 TextFont {
                                     font: font_handle.clone(),
-                                    font_size: 16.0,
+                                    font_size: 18.0,
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -375,8 +425,8 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                             ColorblindButton,
                             Button,
                             Node {
-                                width: Val::Px(160.0),
-                                height: Val::Px(45.0),
+                                width: Val::Px(180.0),
+                                height: Val::Px(50.0),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 border: UiRect::all(Val::Px(2.0)),
@@ -391,7 +441,7 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 Text::new("Numbers: ON"),
                                 TextFont {
                                     font: font_handle.clone(),
-                                    font_size: 16.0,
+                                    font_size: 18.0,
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -404,18 +454,26 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
 fn update_score_hud(
     score: Option<Res<Score>>,
     high_score: Option<Res<crate::game_state::HighScore>>,
-    mut query: Query<&mut Text, With<ScoreText>>,
+    mut current_query: Query<&mut Text, (With<CurrentScoreText>, Without<HighScoreText>)>,
+    mut high_query: Query<&mut Text, (With<HighScoreText>, Without<CurrentScoreText>)>,
 ) {
     let Some(score) = score else {
         return;
     };
-    let Ok(mut text) = query.single_mut() else {
-        return;
-    };
     let hi = high_score.map(|h| h.0).unwrap_or(0);
-    let new_text = format!("Score: {:06}  HI: {:06}", score.total, hi);
-    if text.0 != new_text {
-        text.0 = new_text;
+
+    if let Ok(mut text) = current_query.single_mut() {
+        let new_text = format!("Score: {:06}", score.total);
+        if text.0 != new_text {
+            text.0 = new_text;
+        }
+    }
+
+    if let Ok(mut text) = high_query.single_mut() {
+        let new_text = format!("HI: {:06}", hi);
+        if text.0 != new_text {
+            text.0 = new_text;
+        }
     }
 }
 
@@ -552,7 +610,7 @@ fn spawn_game_over_screen(
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(20.0),
+                row_gap: Val::Px(25.0),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
@@ -563,7 +621,7 @@ fn spawn_game_over_screen(
                 Text::new("FATAL: board.overflow"),
                 TextFont {
                     font: font_handle.clone(),
-                    font_size: 40.0,
+                    font_size: 48.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 0.1, 0.1)),
@@ -573,7 +631,7 @@ fn spawn_game_over_screen(
                 Text::new(format!("final.score = {:06}", score.total)),
                 TextFont {
                     font: font_handle.clone(),
-                    font_size: 32.0,
+                    font_size: 36.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.1, 0.9, 0.1)),
@@ -583,7 +641,7 @@ fn spawn_game_over_screen(
                 Text::new("[ press space to restart ]"),
                 TextFont {
                     font: font_handle.clone(),
-                    font_size: 20.0,
+                    font_size: 24.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.5, 0.8, 0.5)),
@@ -595,8 +653,8 @@ fn spawn_game_over_screen(
                     RestartButton,
                     Button,
                     Node {
-                        width: Val::Px(160.0),
-                        height: Val::Px(45.0),
+                        width: Val::Px(180.0),
+                        height: Val::Px(50.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         border: UiRect::all(Val::Px(2.0)),
@@ -611,7 +669,7 @@ fn spawn_game_over_screen(
                         Text::new("RESTART"),
                         TextFont {
                             font: font_handle.clone(),
-                            font_size: 18.0,
+                            font_size: 22.0,
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -736,7 +794,7 @@ fn spawn_main_menu_screen(mut commands: Commands, asset_server: Res<AssetServer>
                 Text::new("akiuS"),
                 TextFont {
                     font: font_handle.clone(),
-                    font_size: 56.0,
+                    font_size: 64.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.2, 0.9, 0.6)),
@@ -746,7 +804,7 @@ fn spawn_main_menu_screen(mut commands: Commands, asset_server: Res<AssetServer>
                 Text::new("[ press space to start ]"),
                 TextFont {
                     font: font_handle.clone(),
-                    font_size: 22.0,
+                    font_size: 26.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.5, 0.8, 0.5)),
@@ -758,8 +816,8 @@ fn spawn_main_menu_screen(mut commands: Commands, asset_server: Res<AssetServer>
                     StartButton,
                     Button,
                     Node {
-                        width: Val::Px(160.0),
-                        height: Val::Px(45.0),
+                        width: Val::Px(180.0),
+                        height: Val::Px(50.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         border: UiRect::all(Val::Px(2.0)),
@@ -774,7 +832,7 @@ fn spawn_main_menu_screen(mut commands: Commands, asset_server: Res<AssetServer>
                         Text::new("START"),
                         TextFont {
                             font: font_handle.clone(),
-                            font_size: 18.0,
+                            font_size: 22.0,
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -785,14 +843,15 @@ fn spawn_main_menu_screen(mut commands: Commands, asset_server: Res<AssetServer>
             parent
                 .spawn((
                     Node {
-                        width: Val::Px(500.0),
+                        width: Val::Percent(95.0),
+                        max_width: Val::Px(680.0),
                         flex_direction: FlexDirection::Column,
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::FlexStart,
                         border: UiRect::all(Val::Px(2.0)),
                         padding: UiRect::all(Val::Px(15.0)),
                         margin: UiRect::top(Val::Px(15.0)),
-                        row_gap: Val::Px(8.0),
+                        row_gap: Val::Px(10.0),
                         ..default()
                     },
                     BorderColor::all(Color::srgb(0.2, 0.6, 0.4)), // Muted green border
@@ -803,7 +862,7 @@ fn spawn_main_menu_screen(mut commands: Commands, asset_server: Res<AssetServer>
                         Text::new("--- TELEMETRY / INSTRUCTION MANUAL ---"),
                         TextFont {
                             font: font_handle.clone(),
-                            font_size: 15.0,
+                            font_size: 26.0,
                             ..default()
                         },
                         TextColor(Color::srgb(0.2, 0.9, 0.6)), // Bright phosphor green
@@ -826,7 +885,7 @@ fn spawn_main_menu_screen(mut commands: Commands, asset_server: Res<AssetServer>
                             Text::new(inst),
                             TextFont {
                                 font: font_handle.clone(),
-                                font_size: 13.0,
+                                font_size: 20.0,
                                 ..default()
                             },
                             TextColor(Color::srgb(0.7, 0.9, 0.8)), // Muted terminal text
@@ -848,7 +907,7 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>, asset_server: Res
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(20.0),
+                row_gap: Val::Px(25.0),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
@@ -859,7 +918,7 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>, asset_server: Res
                 Text::new("SYSTEM OK: cosmic.collapse"),
                 TextFont {
                     font: font_handle.clone(),
-                    font_size: 40.0,
+                    font_size: 48.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.95, 0.75, 0.1)),
@@ -869,7 +928,7 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>, asset_server: Res
                 Text::new(format!("final.score = {:06}", score.total)),
                 TextFont {
                     font: font_handle.clone(),
-                    font_size: 32.0,
+                    font_size: 36.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.1, 0.9, 0.1)),
@@ -879,7 +938,7 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>, asset_server: Res
                 Text::new("[ press space to play again ]"),
                 TextFont {
                     font: font_handle.clone(),
-                    font_size: 20.0,
+                    font_size: 24.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.5, 0.8, 0.5)),
@@ -891,8 +950,8 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>, asset_server: Res
                     RestartButton,
                     Button,
                     Node {
-                        width: Val::Px(160.0),
-                        height: Val::Px(45.0),
+                        width: Val::Px(180.0),
+                        height: Val::Px(50.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         border: UiRect::all(Val::Px(2.0)),
@@ -907,7 +966,7 @@ fn spawn_win_screen(mut commands: Commands, score: Res<Score>, asset_server: Res
                         Text::new("RESTART"),
                         TextFont {
                             font: font_handle.clone(),
-                            font_size: 18.0,
+                            font_size: 22.0,
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -946,6 +1005,103 @@ fn update_aim_guide_button_text(
     if aim_line_mode.is_changed() {
         if let Ok(mut text) = query.single_mut() {
             text.0 = format!("Aim Line: {}", if aim_line_mode.0 { "ON" } else { "OFF" });
+        }
+    }
+}
+
+fn responsive_hud_layout(
+    window_query: Query<&Window>,
+    mut top_row_query: Query<&mut Node, (With<HudTopRow>, Without<HudBottomRow>, Without<HudLeftCol>, Without<HudCenterCol>, Without<HudRightCol>)>,
+    mut bottom_row_query: Query<&mut Node, (With<HudBottomRow>, Without<HudTopRow>, Without<HudLeftCol>, Without<HudCenterCol>, Without<HudRightCol>)>,
+    mut left_col_query: Query<&mut Node, (With<HudLeftCol>, Without<HudTopRow>, Without<HudBottomRow>, Without<HudCenterCol>, Without<HudRightCol>)>,
+    mut center_col_query: Query<&mut Node, (With<HudCenterCol>, Without<HudTopRow>, Without<HudBottomRow>, Without<HudLeftCol>, Without<HudRightCol>)>,
+    mut right_col_query: Query<&mut Node, (With<HudRightCol>, Without<HudTopRow>, Without<HudBottomRow>, Without<HudLeftCol>, Without<HudCenterCol>)>,
+) {
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+
+    let is_vertical = window.width() < window.height();
+
+    if let Ok(mut top_row) = top_row_query.single_mut() {
+        let (dir, align, justify, gap) = if is_vertical {
+            (FlexDirection::Column, AlignItems::Center, JustifyContent::Center, Val::Px(8.0))
+        } else {
+            (FlexDirection::Row, AlignItems::Center, JustifyContent::SpaceBetween, Val::Px(0.0))
+        };
+        if top_row.flex_direction != dir {
+            top_row.flex_direction = dir;
+        }
+        if top_row.align_items != align {
+            top_row.align_items = align;
+        }
+        if top_row.justify_content != justify {
+            top_row.justify_content = justify;
+        }
+        if top_row.row_gap != gap {
+            top_row.row_gap = gap;
+        }
+    }
+
+    if let Ok(mut bottom_row) = bottom_row_query.single_mut() {
+        let (dir, align, justify, r_gap, c_gap) = if is_vertical {
+            (FlexDirection::Column, AlignItems::Center, JustifyContent::Center, Val::Px(10.0), Val::Px(0.0))
+        } else {
+            (FlexDirection::Row, AlignItems::Center, JustifyContent::FlexEnd, Val::Px(0.0), Val::Px(15.0))
+        };
+        if bottom_row.flex_direction != dir {
+            bottom_row.flex_direction = dir;
+        }
+        if bottom_row.align_items != align {
+            bottom_row.align_items = align;
+        }
+        if bottom_row.justify_content != justify {
+            bottom_row.justify_content = justify;
+        }
+        if bottom_row.row_gap != r_gap {
+            bottom_row.row_gap = r_gap;
+        }
+        if bottom_row.column_gap != c_gap {
+            bottom_row.column_gap = c_gap;
+        }
+    }
+
+    if let Ok(mut left_col) = left_col_query.single_mut() {
+        let (width, justify) = if is_vertical {
+            (Val::Percent(100.0), JustifyContent::Center)
+        } else {
+            (Val::Percent(33.333), JustifyContent::FlexStart)
+        };
+        if left_col.width != width {
+            left_col.width = width;
+        }
+        if left_col.justify_content != justify {
+            left_col.justify_content = justify;
+        }
+    }
+
+    if let Ok(mut center_col) = center_col_query.single_mut() {
+        let width = if is_vertical {
+            Val::Percent(100.0)
+        } else {
+            Val::Percent(33.333)
+        };
+        if center_col.width != width {
+            center_col.width = width;
+        }
+    }
+
+    if let Ok(mut right_col) = right_col_query.single_mut() {
+        let (width, justify) = if is_vertical {
+            (Val::Percent(100.0), JustifyContent::Center)
+        } else {
+            (Val::Percent(33.333), JustifyContent::FlexEnd)
+        };
+        if right_col.width != width {
+            right_col.width = width;
+        }
+        if right_col.justify_content != justify {
+            right_col.justify_content = justify;
         }
     }
 }
