@@ -17,8 +17,8 @@ pub struct LauncherState {
 
 impl Default for LauncherState {
     fn default() -> Self {
-        let mut cooldown_timer = Timer::from_seconds(0.8, TimerMode::Once);
-        cooldown_timer.tick(std::time::Duration::from_secs_f32(0.8));
+        let mut cooldown_timer = Timer::from_seconds(0.4, TimerMode::Once);
+        cooldown_timer.tick(std::time::Duration::from_secs_f32(0.4));
         Self {
             active_x: 0.0,
             target_x: 0.0,
@@ -342,7 +342,7 @@ pub fn update_launcher_preview_visuals(
 
     // Hide preview sphere during the first part of the cooldown for a smoother spawning feel
     let elapsed = launcher_state.cooldown_timer.elapsed_secs();
-    if !launcher_state.cooldown_timer.is_finished() && elapsed < 0.4 {
+    if !launcher_state.cooldown_timer.is_finished() && elapsed < 0.2 {
         crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
     } else {
         crate::utils::set_visibility(&mut visibility, Visibility::Visible);

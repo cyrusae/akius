@@ -766,7 +766,7 @@ fn update_preview_label(
 
     // Toggle visibility based on colorblind mode AND the preview sphere's visibility
     let elapsed = launcher_state.cooldown_timer.elapsed_secs();
-    let is_preview_visible = launcher_state.cooldown_timer.is_finished() || elapsed >= 0.4;
+    let is_preview_visible = launcher_state.cooldown_timer.is_finished() || elapsed >= 0.2;
 
     if colorblind.0 && is_preview_visible {
         let Ok((camera, cam_transform)) = camera_3d_query.single() else {
@@ -911,7 +911,7 @@ fn update_targeting_reticle(
 
         if is_in_game {
             let elapsed = launcher_state.cooldown_timer.elapsed_secs();
-            let is_preview_visible = launcher_state.cooldown_timer.is_finished() || elapsed >= 0.4;
+            let is_preview_visible = launcher_state.cooldown_timer.is_finished() || elapsed >= 0.2;
 
             if is_preview_visible {
                 crate::utils::set_visibility(&mut visibility, Visibility::Visible);
@@ -985,7 +985,10 @@ pub fn animate_merged_spawns(
     effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
     cooldown_query: Query<&crate::physics::MergeCooldown>,
     fulfilling_query: Query<&crate::game_state::Fulfilling>,
-    mut visual_query: Query<(Entity, &ChildOf, &mut Transform, Option<&SphereCore>), Or<(With<SphereVisual>, With<SphereCore>)>>,
+    mut visual_query: Query<
+        (Entity, &ChildOf, &mut Transform, Option<&SphereCore>),
+        Or<(With<SphereVisual>, With<SphereCore>)>,
+    >,
     // Labels are UI nodes: in Bevy 0.18 they carry `UiTransform`, not `Transform`.
     mut label_query: Query<(&BillboardLabel, &mut UiTransform)>,
 ) {
@@ -1039,7 +1042,10 @@ pub fn animate_merged_spawns(
 pub fn animate_fulfilling_spheres(
     effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
     fulfillment: Option<Res<crate::game_state::ActiveFulfillment>>,
-    mut visual_query: Query<(&ChildOf, &mut Transform, Option<&SphereCore>), Or<(With<SphereVisual>, With<SphereCore>)>>,
+    mut visual_query: Query<
+        (&ChildOf, &mut Transform, Option<&SphereCore>),
+        Or<(With<SphereVisual>, With<SphereCore>)>,
+    >,
     // Labels are UI nodes: in Bevy 0.18 they carry `UiTransform`, not `Transform`.
     mut label_query: Query<(&BillboardLabel, &mut UiTransform)>,
 ) {
@@ -1103,7 +1109,13 @@ pub fn cleanup_launcher_visuals(
 fn update_sphere_effects(
     effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
     mut core_query: Query<(&mut Visibility, &mut Transform), With<SphereCore>>,
-    mut outer_query: Query<&mut Visibility, (Or<(With<SphereVisual>, With<LauncherPreview>)>, Without<SphereCore>)>,
+    mut outer_query: Query<
+        &mut Visibility,
+        (
+            Or<(With<SphereVisual>, With<LauncherPreview>)>,
+            Without<SphereCore>,
+        ),
+    >,
 ) {
     let is_effects_on = effects_mode
         .map(|m| *m == crate::game_state::VisualEffectsMode::On)

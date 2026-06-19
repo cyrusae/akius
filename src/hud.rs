@@ -1011,11 +1011,56 @@ fn update_aim_guide_button_text(
 
 fn responsive_hud_layout(
     window_query: Query<&Window>,
-    mut top_row_query: Query<&mut Node, (With<HudTopRow>, Without<HudBottomRow>, Without<HudLeftCol>, Without<HudCenterCol>, Without<HudRightCol>)>,
-    mut bottom_row_query: Query<&mut Node, (With<HudBottomRow>, Without<HudTopRow>, Without<HudLeftCol>, Without<HudCenterCol>, Without<HudRightCol>)>,
-    mut left_col_query: Query<&mut Node, (With<HudLeftCol>, Without<HudTopRow>, Without<HudBottomRow>, Without<HudCenterCol>, Without<HudRightCol>)>,
-    mut center_col_query: Query<&mut Node, (With<HudCenterCol>, Without<HudTopRow>, Without<HudBottomRow>, Without<HudLeftCol>, Without<HudRightCol>)>,
-    mut right_col_query: Query<&mut Node, (With<HudRightCol>, Without<HudTopRow>, Without<HudBottomRow>, Without<HudLeftCol>, Without<HudCenterCol>)>,
+    mut top_row_query: Query<
+        &mut Node,
+        (
+            With<HudTopRow>,
+            Without<HudBottomRow>,
+            Without<HudLeftCol>,
+            Without<HudCenterCol>,
+            Without<HudRightCol>,
+        ),
+    >,
+    mut bottom_row_query: Query<
+        &mut Node,
+        (
+            With<HudBottomRow>,
+            Without<HudTopRow>,
+            Without<HudLeftCol>,
+            Without<HudCenterCol>,
+            Without<HudRightCol>,
+        ),
+    >,
+    mut left_col_query: Query<
+        &mut Node,
+        (
+            With<HudLeftCol>,
+            Without<HudTopRow>,
+            Without<HudBottomRow>,
+            Without<HudCenterCol>,
+            Without<HudRightCol>,
+        ),
+    >,
+    mut center_col_query: Query<
+        &mut Node,
+        (
+            With<HudCenterCol>,
+            Without<HudTopRow>,
+            Without<HudBottomRow>,
+            Without<HudLeftCol>,
+            Without<HudRightCol>,
+        ),
+    >,
+    mut right_col_query: Query<
+        &mut Node,
+        (
+            With<HudRightCol>,
+            Without<HudTopRow>,
+            Without<HudBottomRow>,
+            Without<HudLeftCol>,
+            Without<HudCenterCol>,
+        ),
+    >,
 ) {
     let Ok(window) = window_query.single() else {
         return;
@@ -1025,9 +1070,19 @@ fn responsive_hud_layout(
 
     if let Ok(mut top_row) = top_row_query.single_mut() {
         let (dir, align, justify, gap) = if is_vertical {
-            (FlexDirection::Column, AlignItems::Center, JustifyContent::Center, Val::Px(8.0))
+            (
+                FlexDirection::Column,
+                AlignItems::Center,
+                JustifyContent::Center,
+                Val::Px(8.0),
+            )
         } else {
-            (FlexDirection::Row, AlignItems::Center, JustifyContent::SpaceBetween, Val::Px(0.0))
+            (
+                FlexDirection::Row,
+                AlignItems::Center,
+                JustifyContent::SpaceBetween,
+                Val::Px(0.0),
+            )
         };
         if top_row.flex_direction != dir {
             top_row.flex_direction = dir;
@@ -1045,9 +1100,21 @@ fn responsive_hud_layout(
 
     if let Ok(mut bottom_row) = bottom_row_query.single_mut() {
         let (dir, align, justify, r_gap, c_gap) = if is_vertical {
-            (FlexDirection::Column, AlignItems::Center, JustifyContent::Center, Val::Px(10.0), Val::Px(0.0))
+            (
+                FlexDirection::Column,
+                AlignItems::Center,
+                JustifyContent::Center,
+                Val::Px(10.0),
+                Val::Px(0.0),
+            )
         } else {
-            (FlexDirection::Row, AlignItems::Center, JustifyContent::FlexEnd, Val::Px(0.0), Val::Px(15.0))
+            (
+                FlexDirection::Row,
+                AlignItems::Center,
+                JustifyContent::FlexEnd,
+                Val::Px(0.0),
+                Val::Px(15.0),
+            )
         };
         if bottom_row.flex_direction != dir {
             bottom_row.flex_direction = dir;
