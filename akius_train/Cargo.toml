@@ -1,0 +1,8 @@
+[package]
+name = "akius_train"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+akius_core = { path = "../akius_core" }
+pyo3 = { version = "0.21", features = ["extension-module"], optional = true }

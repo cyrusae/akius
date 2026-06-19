@@ -1,0 +1,19 @@
+[package]
+name = "akius_core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.18.1", default-features = false, features = [
+    "std",
+    "async_executor",
+    "multi_threaded",
+    "bevy_log",
+    "bevy_state",
+] }
+bevy_rapier3d = { version = "0.34.0", default-features = false, features = ["dim3", "simd-stable"] }
+rand = "0.9"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+web-sys = { version = "0.3", features = ["Window", "Storage"] }

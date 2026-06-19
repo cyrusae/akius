@@ -1,6 +1,9 @@
-use crate::game_state::{GameSettings, Sphere};
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
+use akius_core::*;
+use akius_core::Sphere;
+use akius_core::core_math;
+use akius_core::physics_rules;
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct LauncherPreview;
@@ -43,37 +46,32 @@ impl Plugin for LauncherPlugin {
                 update_launcher_preview_visuals,
             )
                 .chain()
-                .run_if(in_state(crate::game_state::AppState::InGame)),
+                .run_if(in_state(AppState::InGame)),
         );
     }
 }
 
-/// Updates the aiming position by raycasting the screen cursor coordinates onto the Y=0 plane
-/// and constraining the X coordinate to prevent the preview sphere from overlapping existing spheres.
-/// Also handles A/D and Left/Right keyboard movement as alternative inputs.
 pub fn update_launcher_aiming(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window>,
     settings: Res<GameSettings>,
-    dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
+    dispenser_queue: Option<Res<DispenserQueue>>,
     sphere_query: Query<
         (&Transform, &Sphere, Option<&Velocity>),
-        Without<crate::game_state::Fulfilling>,
+        Without<Fulfilling>,
     >,
     mut launcher_state: ResMut<LauncherState>,
     keyboard: Res<ButtonInput<KeyCode>>,
     touches: Res<Touches>,
     time: Res<Time>,
-    // Scratch buffers reused across frames to avoid per-frame heap allocations.
     mut intervals: Local<Vec<(f32, f32)>>,
     mut merged_intervals: Local<Vec<(f32, f32)>>,
 ) {
     let half_width = settings.arena_width * 0.5;
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
-    let preview_radius = crate::core_math::get_radius(current_tier);
+    let preview_radius = core_math::get_radius(current_tier);
     let limit_x = (half_width - preview_radius).max(0.0);
 
-    // 1. Get position from touch or cursor
     let mut new_target_x = None;
     let mut current_input_position = None;
     let mut is_touch = false;
@@ -102,7 +100,6 @@ pub fn update_launcher_aiming(
 
     let input_moved = if let Some(pos) = current_input_position {
         if is_touch {
-            // Touch targeting directly controls launcher positioning
             true
         } else if let Some(last_pos) = launcher_state.last_cursor_position {
             (pos - last_pos).length_squared() > 1e-4
@@ -113,14 +110,12 @@ pub fn update_launcher_aiming(
         false
     };
 
-    // 2. Decide target_x source (input vs keyboard)
     let mut clamped_x = launcher_state.target_x;
     if input_moved {
         if let Some(x) = new_target_x {
             clamped_x = x;
         }
     } else {
-        // Read keyboard input
         let mut keyboard_dir = 0.0;
         if keyboard.pressed(KeyCode::KeyA) || keyboard.pressed(KeyCode::ArrowLeft) {
             keyboard_dir -= 1.0;
@@ -130,33 +125,29 @@ pub fn update_launcher_aiming(
         }
 
         if keyboard_dir != 0.0 {
-            let keyboard_speed = 8.0; // speed units per second
+            let keyboard_speed = 8.0;
             clamped_x = (clamped_x + keyboard_dir * keyboard_speed * time.delta_secs())
                 .clamp(-limit_x, limit_x);
         }
     }
 
-    // Always update last input position if not touch
     if !is_touch {
         launcher_state.last_cursor_position = current_input_position;
     } else {
         launcher_state.last_cursor_position = None;
     }
 
-    // Compute 1D forbidden intervals on the launcher line (Z = settings.launcher_z)
     intervals.clear();
     for (sphere_transform, sphere, velocity) in sphere_query.iter() {
         if let Some(vel) = velocity {
             if vel.linear.z < -0.5 {
-                // Sphere is moving away from the launcher, ignore it for aiming obstruction snap calculations
                 continue;
             }
         }
-        let sphere_radius = crate::core_math::get_radius(sphere.tier);
+        let sphere_radius = core_math::get_radius(sphere.tier);
         let dz = (settings.launcher_z - sphere_transform.translation.z).abs();
-        let r_sum = preview_radius + sphere_radius + 0.02; // Added 0.02 units visual padding buffer
+        let r_sum = preview_radius + sphere_radius + 0.02;
         if dz < r_sum {
-            // Overlap is possible along X
             let dx_max = (r_sum * r_sum - dz * dz).sqrt();
             let min_x = sphere_transform.translation.x - dx_max;
             let max_x = sphere_transform.translation.x + dx_max;
@@ -164,7 +155,6 @@ pub fn update_launcher_aiming(
         }
     }
 
-    // Merge overlapping intervals
     intervals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     merged_intervals.clear();
     for &interval in intervals.iter() {
@@ -179,8 +169,6 @@ pub fn update_launcher_aiming(
         }
     }
 
-    // Adjust target X if it lies within a forbidden interval.
-    // Snap only to options that are within the [-limit_x, limit_x] table boundaries.
     for &(a, b) in merged_intervals.iter() {
         if clamped_x > a && clamped_x < b {
             let left_valid = a >= -limit_x;
@@ -199,7 +187,6 @@ pub fn update_launcher_aiming(
             }
         }
     }
-    // Re-clamp to boundaries in case snapping pushed it out of range
     clamped_x = clamped_x.clamp(-limit_x, limit_x);
 
     launcher_state.target_x = clamped_x;
@@ -209,15 +196,12 @@ pub fn update_launcher_aiming(
     launcher_state.active_x += (clamped_x - launcher_state.active_x) * lerp_factor;
 }
 
-/// Checks if spawning the preview sphere at the active aim point overlaps settled spheres
 pub fn check_launcher_obstructions(
     settings: Res<GameSettings>,
-    dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
+    dispenser_queue: Option<Res<DispenserQueue>>,
     mut launcher_state: ResMut<LauncherState>,
     rapier_context: ReadRapierContext,
     sphere_query: Query<&Sphere>,
-    // Cache the query shape per tier instead of heap-allocating a new Rapier
-    // collider every frame.
     mut cached_shape: Local<Option<(u8, Collider)>>,
 ) {
     let Ok(context) = rapier_context.single() else {
@@ -226,7 +210,7 @@ pub fn check_launcher_obstructions(
 
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
     if cached_shape.as_ref().map(|(tier, _)| *tier) != Some(current_tier) {
-        let radius = crate::core_math::get_radius(current_tier);
+        let radius = core_math::get_radius(current_tier);
         *cached_shape = Some((current_tier, Collider::ball(radius)));
     }
     let shape = &*cached_shape.as_ref().unwrap().1.raw;
@@ -242,35 +226,32 @@ pub fn check_launcher_obstructions(
         |entity| {
             if sphere_query.contains(entity) {
                 obstructed = true;
-                return false; // Stop iterating
+                return false;
             }
-            true // Continue checking other collisions
+            true
         },
     );
 
     launcher_state.obstructed = obstructed;
 }
 
-/// Ticks cooldown and spawns sphere on Left click or Space bar when unobstructed.
-/// Prevents launching during active sphere merge animations.
 pub fn handle_launch_input(
     mut commands: Commands,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     touches: Res<Touches>,
     settings: Res<GameSettings>,
-    dispenser_queue: Option<ResMut<crate::game_state::DispenserQueue>>,
+    dispenser_queue: Option<ResMut<DispenserQueue>>,
     mut launcher_state: ResMut<LauncherState>,
     time: Res<Time>,
     interaction_query: Query<&Interaction>,
-    merge_cooldowns: Query<(), With<crate::physics::MergeCooldown>>,
+    merge_cooldowns: Query<(), With<physics_rules::MergeCooldown>>,
 ) {
     launcher_state.cooldown_timer.tick(time.delta());
 
     let over_ui = interaction_query.iter().any(|&i| i != Interaction::None);
     let is_touch_active = touches.iter().next().is_some() || touches.any_just_released();
 
-    // Track touch lifecycle inside InGame
     for touch in touches.iter_just_pressed() {
         if !launcher_state.active_touch_ids.contains(&touch.id()) {
             launcher_state.active_touch_ids.push(touch.id());
@@ -307,7 +288,7 @@ pub fn handle_launch_input(
         let launch_position = Vec3::new(launcher_state.active_x, 0.0, settings.launcher_z);
         let launch_velocity = Vec3::new(0.0, 0.0, -settings.launch_speed);
 
-        crate::physics::spawn_sphere_entity(
+        physics_rules::spawn_sphere_entity(
             &mut commands,
             current_tier,
             launch_position,
@@ -316,18 +297,17 @@ pub fn handle_launch_input(
 
         if let Some(mut queue) = dispenser_queue {
             queue.current = queue.next;
-            queue.next = crate::core_math::get_random_dispensed_tier(&mut rand::rng());
+            queue.next = core_math::get_random_dispensed_tier(&mut rand::rng());
         }
 
         launcher_state.cooldown_timer.reset();
     }
 }
 
-/// Updates the visualization of the preview sphere entity
 pub fn update_launcher_preview_visuals(
     launcher_state: Res<LauncherState>,
     settings: Res<GameSettings>,
-    dispenser_queue: Option<Res<crate::game_state::DispenserQueue>>,
+    dispenser_queue: Option<Res<DispenserQueue>>,
     mut preview_query: Query<(&mut Transform, &mut Visibility), With<LauncherPreview>>,
 ) {
     let Ok((mut transform, mut visibility)) = preview_query.single_mut() else {
@@ -335,12 +315,11 @@ pub fn update_launcher_preview_visuals(
     };
 
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
-    let radius = crate::core_math::get_radius(current_tier);
+    let radius = core_math::get_radius(current_tier);
 
     transform.translation = Vec3::new(launcher_state.active_x, radius, settings.launcher_z);
     transform.scale = Vec3::splat(radius);
 
-    // Hide preview sphere during the first part of the cooldown for a smoother spawning feel
     let elapsed = launcher_state.cooldown_timer.elapsed_secs();
     if !launcher_state.cooldown_timer.is_finished() && elapsed < 0.2 {
         crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
@@ -410,7 +389,7 @@ mod tests {
         });
         app.add_systems(Update, check_launcher_obstructions);
 
-        crate::physics::spawn_sphere_entity(
+        physics_rules::spawn_sphere_entity(
             &mut app.world_mut().commands(),
             1,
             Vec3::new(1.0, 0.0, 12.0),
@@ -439,7 +418,7 @@ mod tests {
             active_x: 2.0,
             ..default()
         });
-        app.insert_resource(crate::game_state::DispenserQueue {
+        app.insert_resource(DispenserQueue {
             current: 3,
             next: 4,
         });
@@ -464,7 +443,7 @@ mod tests {
             if sphere.tier == 3 {
                 assert_eq!(
                     transform.translation,
-                    Vec3::new(2.0, crate::core_math::get_radius(3), 12.0)
+                    Vec3::new(2.0, core_math::get_radius(3), 12.0)
                 );
                 assert_eq!(velocity.linear, Vec3::new(0.0, 0.0, -15.0));
                 found = true;
@@ -472,7 +451,7 @@ mod tests {
         }
         assert!(found, "Launched sphere not found in world");
 
-        let queue = app.world().resource::<crate::game_state::DispenserQueue>();
+        let queue = app.world().resource::<DispenserQueue>();
         assert_eq!(queue.current, 4);
         assert!(queue.next >= 1 && queue.next <= 5);
     }
@@ -486,7 +465,7 @@ mod tests {
             active_x: 0.0,
             ..default()
         });
-        app.insert_resource(crate::game_state::DispenserQueue {
+        app.insert_resource(DispenserQueue {
             current: 1,
             next: 2,
         });
@@ -504,7 +483,7 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .resource::<crate::game_state::DispenserQueue>()
+                .resource::<DispenserQueue>()
                 .current,
             2
         );
@@ -520,7 +499,7 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .resource::<crate::game_state::DispenserQueue>()
+                .resource::<DispenserQueue>()
                 .current,
             2
         );
@@ -535,7 +514,7 @@ mod tests {
             active_x: 0.0,
             ..default()
         });
-        app.insert_resource(crate::game_state::DispenserQueue {
+        app.insert_resource(DispenserQueue {
             current: 1,
             next: 2,
         });
@@ -545,22 +524,19 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         app.add_systems(Update, handle_launch_input);
 
-        // Spawn a dummy entity with MergeCooldown to simulate active merge animation
-        app.world_mut().spawn(crate::physics::MergeCooldown {
+        app.world_mut().spawn(physics_rules::MergeCooldown {
             timer: Timer::from_seconds(0.5, TimerMode::Once),
         });
 
-        // Try to fire
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
         app.update();
         app.update();
 
-        // The launch should be blocked, queue.current remains 1
         assert_eq!(
             app.world()
-                .resource::<crate::game_state::DispenserQueue>()
+                .resource::<DispenserQueue>()
                 .current,
             1
         );
@@ -573,10 +549,10 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(bevy::input::InputPlugin);
         app.add_plugins(bevy::state::app::StatesPlugin);
-        app.init_state::<crate::game_state::AppState>();
+        app.init_state::<AppState>();
         app.insert_resource(GameSettings::default());
         app.insert_resource(LauncherState::default());
-        app.insert_resource(crate::game_state::DispenserQueue {
+        app.insert_resource(DispenserQueue {
             current: 1,
             next: 2,
         });
@@ -586,10 +562,9 @@ mod tests {
 
         app.add_systems(
             Update,
-            handle_launch_input.run_if(in_state(crate::game_state::AppState::InGame)),
+            handle_launch_input.run_if(in_state(AppState::InGame)),
         );
 
-        // Case 1: Touch started before InGame (e.g. in MainMenu)
         app.world_mut()
             .resource_mut::<Messages<TouchInput>>()
             .write(TouchInput {
@@ -601,13 +576,11 @@ mod tests {
             });
         app.update();
 
-        // Transition to InGame
         app.world_mut()
-            .resource_mut::<NextState<crate::game_state::AppState>>()
-            .set(crate::game_state::AppState::InGame);
-        app.update(); // Apply state transition
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update();
 
-        // Release the touch that started in MainMenu
         app.world_mut()
             .resource_mut::<Messages<TouchInput>>()
             .write(TouchInput {
@@ -619,15 +592,13 @@ mod tests {
             });
         app.update();
 
-        // Verify that the sphere did NOT launch (current remains 1)
         assert_eq!(
             app.world()
-                .resource::<crate::game_state::DispenserQueue>()
+                .resource::<DispenserQueue>()
                 .current,
             1
         );
 
-        // Case 2: Touch starts inside InGame
         app.world_mut()
             .resource_mut::<Messages<TouchInput>>()
             .write(TouchInput {
@@ -650,10 +621,9 @@ mod tests {
             });
         app.update();
 
-        // Verify that the sphere DID launch (current becomes 2)
         assert_eq!(
             app.world()
-                .resource::<crate::game_state::DispenserQueue>()
+                .resource::<DispenserQueue>()
                 .current,
             2
         );

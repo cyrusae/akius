@@ -51,7 +51,7 @@ fn setup_crt_shader(mut shaders: ResMut<Assets<Shader>>) {
     let _ = shaders.insert(
         &CRT_POST_PROCESS_SHADER_HANDLE,
         Shader::from_wgsl(
-            include_str!("../assets/shaders/crt_post_process.wgsl"),
+            include_str!("../../assets/shaders/crt_post_process.wgsl"),
             "shaders/crt_post_process.wgsl",
         ),
     );
@@ -62,8 +62,8 @@ fn update_crt_settings(
     window_query: Query<&Window>,
     mut camera_query: Query<(Entity, Option<&mut CrtPostProcessSettings>), With<Camera3d>>,
     mut commands: Commands,
-    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
-    mut fulfill_events: MessageReader<crate::game_state::FulfillmentBurstEvent>,
+    effects_mode: Option<Res<crate::visuals::VisualEffectsMode>>,
+    mut fulfill_events: MessageReader<akius_core::FulfillmentBurstEvent>,
     mut glitch_val: Local<f32>,
 ) {
     let Ok(window) = window_query.single() else {
@@ -71,7 +71,7 @@ fn update_crt_settings(
     };
     let aspect_ratio = window.width() / window.height();
     let is_effects_on = effects_mode
-        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .map(|m| *m == crate::visuals::VisualEffectsMode::On)
         .unwrap_or(true);
 
     // Decay the full-screen glitch intensity over time

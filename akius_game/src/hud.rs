@@ -1,4 +1,4 @@
-use crate::game_state::{ActiveOrder, AimLineMode, ColorblindMode, DispenserQueue, Score};
+use akius_core::{ActiveOrder, AimLineMode, ColorblindMode, DispenserQueue, Score};
 use crate::visuals::TIER_COLORS;
 use bevy::prelude::*;
 
@@ -89,28 +89,28 @@ impl Plugin for HudPlugin {
                 ),
             )
             .add_systems(
-                OnEnter(crate::game_state::AppState::MainMenu),
+                OnEnter(akius_core::AppState::MainMenu),
                 spawn_main_menu_screen,
             )
             .add_systems(
-                OnExit(crate::game_state::AppState::MainMenu),
+                OnExit(akius_core::AppState::MainMenu),
                 despawn_main_menu_screen,
             )
             .add_systems(
                 Update,
                 (handle_start_input, handle_start_button)
-                    .run_if(in_state(crate::game_state::AppState::MainMenu)),
+                    .run_if(in_state(akius_core::AppState::MainMenu)),
             )
             .add_systems(
-                OnEnter(crate::game_state::AppState::GameOver),
+                OnEnter(akius_core::AppState::GameOver),
                 spawn_game_over_screen,
             )
             .add_systems(
-                OnExit(crate::game_state::AppState::GameOver),
+                OnExit(akius_core::AppState::GameOver),
                 despawn_game_over_screen,
             )
-            .add_systems(OnEnter(crate::game_state::AppState::Win), spawn_win_screen)
-            .add_systems(OnExit(crate::game_state::AppState::Win), despawn_win_screen)
+            .add_systems(OnEnter(akius_core::AppState::Win), spawn_win_screen)
+            .add_systems(OnExit(akius_core::AppState::Win), despawn_win_screen)
             .add_systems(
                 Update,
                 (handle_restart_input, handle_restart_button).run_if(in_game_over_or_win_state),
@@ -453,7 +453,7 @@ fn setup_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
 
 fn update_score_hud(
     score: Option<Res<Score>>,
-    high_score: Option<Res<crate::game_state::HighScore>>,
+    high_score: Option<Res<crate::visuals::HighScore>>,
     mut current_query: Query<&mut Text, (With<CurrentScoreText>, Without<HighScoreText>)>,
     mut high_query: Query<&mut Text, (With<HighScoreText>, Without<CurrentScoreText>)>,
 ) {
@@ -502,7 +502,7 @@ fn update_order_hud(
 
 fn handle_effects_button(
     mut interaction_query: Query<&Interaction, (Changed<Interaction>, With<EffectsButton>)>,
-    mut effects_mode: ResMut<crate::game_state::VisualEffectsMode>,
+    mut effects_mode: ResMut<crate::visuals::VisualEffectsMode>,
     keyboard: Res<ButtonInput<KeyCode>>,
 ) {
     let mut toggle = false;
@@ -516,22 +516,22 @@ fn handle_effects_button(
     }
     if toggle {
         *effects_mode = match *effects_mode {
-            crate::game_state::VisualEffectsMode::On => crate::game_state::VisualEffectsMode::Off,
-            crate::game_state::VisualEffectsMode::Off => crate::game_state::VisualEffectsMode::On,
+            crate::visuals::VisualEffectsMode::On => crate::visuals::VisualEffectsMode::Off,
+            crate::visuals::VisualEffectsMode::Off => crate::visuals::VisualEffectsMode::On,
         };
         info!("Visual effects toggled to: {:?}", *effects_mode);
     }
 }
 
 fn update_effects_button_text(
-    effects_mode: Res<crate::game_state::VisualEffectsMode>,
+    effects_mode: Res<crate::visuals::VisualEffectsMode>,
     mut query: Query<&mut Text, With<EffectsButtonText>>,
 ) {
     if effects_mode.is_changed() {
         for mut text in &mut query {
             text.0 = match *effects_mode {
-                crate::game_state::VisualEffectsMode::On => "FX: ON".to_string(),
-                crate::game_state::VisualEffectsMode::Off => "FX: OFF".to_string(),
+                crate::visuals::VisualEffectsMode::On => "FX: ON".to_string(),
+                crate::visuals::VisualEffectsMode::Off => "FX: OFF".to_string(),
             };
         }
     }
@@ -686,11 +686,11 @@ fn despawn_game_over_screen(mut commands: Commands, query: Query<Entity, With<Ga
 
 fn handle_restart_input(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut next_state: ResMut<NextState<crate::game_state::AppState>>,
+    mut next_state: ResMut<NextState<akius_core::AppState>>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
         info!("Spacebar restart triggered!");
-        next_state.set(crate::game_state::AppState::InGame);
+        next_state.set(akius_core::AppState::InGame);
     }
 }
 
@@ -699,13 +699,13 @@ fn handle_restart_button(
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<RestartButton>),
     >,
-    mut next_state: ResMut<NextState<crate::game_state::AppState>>,
+    mut next_state: ResMut<NextState<akius_core::AppState>>,
 ) {
     for (interaction, mut bg_color) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 info!("Restart button clicked!");
-                next_state.set(crate::game_state::AppState::InGame);
+                next_state.set(akius_core::AppState::InGame);
                 *bg_color = BackgroundColor(Color::srgb(0.35, 0.35, 0.35));
             }
             Interaction::Hovered => {
@@ -718,10 +718,10 @@ fn handle_restart_button(
     }
 }
 
-fn in_game_over_or_win_state(state: Res<State<crate::game_state::AppState>>) -> bool {
+fn in_game_over_or_win_state(state: Res<State<akius_core::AppState>>) -> bool {
     matches!(
         *state.get(),
-        crate::game_state::AppState::GameOver | crate::game_state::AppState::Win
+        akius_core::AppState::GameOver | akius_core::AppState::Win
     )
 }
 
@@ -739,11 +739,11 @@ fn despawn_win_screen(mut commands: Commands, query: Query<Entity, With<WinScree
 
 fn handle_start_input(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut next_state: ResMut<NextState<crate::game_state::AppState>>,
+    mut next_state: ResMut<NextState<akius_core::AppState>>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
         info!("Spacebar start triggered!");
-        next_state.set(crate::game_state::AppState::InGame);
+        next_state.set(akius_core::AppState::InGame);
     }
 }
 
@@ -752,13 +752,13 @@ fn handle_start_button(
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<StartButton>),
     >,
-    mut next_state: ResMut<NextState<crate::game_state::AppState>>,
+    mut next_state: ResMut<NextState<akius_core::AppState>>,
 ) {
     for (interaction, mut bg_color) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 info!("Start button clicked!");
-                next_state.set(crate::game_state::AppState::InGame);
+                next_state.set(akius_core::AppState::InGame);
                 *bg_color = BackgroundColor(Color::srgb(0.35, 0.35, 0.35));
             }
             Interaction::Hovered => {
@@ -1176,7 +1176,7 @@ fn responsive_hud_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game_state::AppState;
+    use akius_core::AppState;
     use bevy::ecs::system::RunSystemOnce;
 
     #[test]

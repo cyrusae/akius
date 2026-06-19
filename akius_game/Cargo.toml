@@ -1,0 +1,59 @@
+[package]
+name = "akius_game"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+akius_core = { path = "../akius_core" }
+bevy = { version = "0.18.1", default-features = false, features = [
+    # App core / platform
+    "std",
+    "async_executor",
+    "multi_threaded",
+    "bevy_log",
+    "bevy_asset",
+    "bevy_state",
+    "bevy_window",
+    "bevy_winit",
+    "bevy_input_focus",
+    "keyboard",
+    "mouse",
+    "touch",
+    # Native windowing
+    "x11",
+    "wayland",
+    # Web rendering backend
+    "webgl2",
+    # 3D rendering
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_light",
+    "bevy_post_process",
+    "bevy_camera",
+    "bevy_color",
+    "bevy_mesh",
+    "bevy_shader",
+    "bevy_image",
+    "png",
+    # Required by Bevy's default tonemapping
+    "tonemapping_luts",
+    "ktx2",
+    "zstd_rust",
+    # UI + text
+    "bevy_ui",
+    "bevy_ui_render",
+    "bevy_text",
+    "default_font",
+    # Audio
+    "bevy_audio",
+    "vorbis",
+    "wav",
+] }
+bevy_rapier3d = { version = "0.34.0", default-features = false, features = ["dim3", "simd-stable"] }
+bevy_mesh = "0.18.1"
+rand = "0.9"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+web-sys = { version = "0.3", features = ["Window", "Storage"] }

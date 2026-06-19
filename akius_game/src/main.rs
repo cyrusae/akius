@@ -1,17 +1,14 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
-mod core_math;
-mod game_state;
 mod hud;
 mod launcher;
-mod physics;
 mod utils;
 mod visuals;
-
 mod crt_post_process;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
+use akius_core::*;
 
 fn main() {
     App::new()
@@ -35,55 +32,55 @@ fn main() {
                 }),
         )
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugins(physics::PhysicsPlugin)
+        .add_plugins(akius_core::physics_rules::PhysicsPlugin)
         .add_plugins(launcher::LauncherPlugin)
         .add_plugins(visuals::VisualPlugin)
         .add_plugins(hud::HudPlugin)
         .add_plugins(crt_post_process::CrtPostProcessPlugin)
-        .init_state::<game_state::AppState>()
-        .insert_resource(game_state::GameSettings::default())
-        .insert_resource(game_state::Score::default())
-        .insert_resource(game_state::ColorblindMode::default())
-        .insert_resource(game_state::AimLineMode::default())
-        .insert_resource(game_state::VisualEffectsMode::default())
-        .insert_resource(game_state::ActiveOrder { target_tier: 6 })
-        .insert_resource(game_state::DispenserQueue {
+        .init_state::<AppState>()
+        .insert_resource(GameSettings::default())
+        .insert_resource(Score::default())
+        .insert_resource(ColorblindMode::default())
+        .insert_resource(AimLineMode::default())
+        .insert_resource(visuals::VisualEffectsMode::default())
+        .insert_resource(ActiveOrder { target_tier: 6 })
+        .insert_resource(DispenserQueue {
             current: 1,
             next: 2,
         })
-        .insert_resource(game_state::ActiveFulfillment::default())
-        .insert_resource(game_state::HighScore(
-            game_state::load_high_score_from_local_storage(),
+        .insert_resource(ActiveFulfillment::default())
+        .insert_resource(visuals::HighScore(
+            visuals::load_high_score_from_local_storage(),
         ))
-        .add_message::<game_state::FulfillmentBurstEvent>()
+        .add_message::<FulfillmentBurstEvent>()
         .add_systems(Startup, setup_camera_and_light)
         .add_systems(
-            OnEnter(game_state::AppState::InGame),
-            game_state::reset_game_state,
+            OnEnter(AppState::InGame),
+            reset_game_state,
         )
         .add_systems(
             Update,
             (
-                game_state::check_loss_condition,
-                game_state::check_order_fulfillment,
+                check_loss_condition,
+                check_order_fulfillment,
             )
-                .run_if(in_state(game_state::AppState::InGame)),
+                .run_if(in_state(AppState::InGame)),
         )
         .add_systems(
             Update,
             (
-                game_state::update_high_score,
-                game_state::auto_degrade_visual_effects,
+                visuals::update_high_score,
+                visuals::auto_degrade_visual_effects,
                 adjust_camera_fov,
             ),
         )
         .add_systems(
-            OnEnter(game_state::AppState::GameOver),
-            game_state::flush_high_score,
+            OnEnter(AppState::GameOver),
+            visuals::flush_high_score,
         )
         .add_systems(
-            OnEnter(game_state::AppState::Win),
-            game_state::flush_high_score,
+            OnEnter(AppState::Win),
+            visuals::flush_high_score,
         )
         .run();
 }

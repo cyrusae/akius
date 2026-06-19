@@ -1,10 +1,10 @@
-use crate::core_math::get_radius;
-use crate::game_state::{AimLineMode, ColorblindMode, DispenserQueue, GameSettings, Sphere};
-use crate::launcher::{LauncherPreview, LauncherState};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 use bevy_rapier3d::prelude::Collider;
+use akius_core::core_math::get_radius;
+use akius_core::{AimLineMode, ColorblindMode, DispenserQueue, GameSettings, Sphere};
+use crate::launcher::{LauncherPreview, LauncherState};
 
 // ---------------------------------------------------------------------------
 // Tier color palette — vibrant rainbow gradient, designed to be distinct.
@@ -245,28 +245,28 @@ fn setup_visuals_shaders(mut shaders: ResMut<Assets<Shader>>) {
     let _ = shaders.insert(
         &SPHERE_GRID_SHADER_HANDLE,
         Shader::from_wgsl(
-            include_str!("../assets/shaders/sphere_grid.wgsl"),
+            include_str!("../../assets/shaders/sphere_grid.wgsl"),
             "shaders/sphere_grid.wgsl",
         ),
     );
     let _ = shaders.insert(
         &FLOOR_GRID_SHADER_HANDLE,
         Shader::from_wgsl(
-            include_str!("../assets/shaders/floor_grid.wgsl"),
+            include_str!("../../assets/shaders/floor_grid.wgsl"),
             "shaders/floor_grid.wgsl",
         ),
     );
     let _ = shaders.insert(
         &LASER_LINE_SHADER_HANDLE,
         Shader::from_wgsl(
-            include_str!("../assets/shaders/laser_line.wgsl"),
+            include_str!("../../assets/shaders/laser_line.wgsl"),
             "shaders/laser_line.wgsl",
         ),
     );
     let _ = shaders.insert(
         &RETICLE_SHADER_HANDLE,
         Shader::from_wgsl(
-            include_str!("../assets/shaders/reticle.wgsl"),
+            include_str!("../../assets/shaders/reticle.wgsl"),
             "shaders/reticle.wgsl",
         ),
     );
@@ -302,7 +302,7 @@ impl Plugin for VisualPlugin {
                 ),
             )
             .add_systems(
-                OnExit(crate::game_state::AppState::InGame),
+                OnExit(akius_core::AppState::InGame),
                 cleanup_launcher_visuals,
             )
             // Observer: fires whenever a Sphere component is added to any entity
@@ -663,7 +663,7 @@ fn update_preview_material(
 // Position each active label in 2D screen space above its tracked 3D sphere, applying CRT barrel distortion if active.
 fn update_labels_screen_position(
     colorblind: Res<ColorblindMode>,
-    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
+    effects_mode: Option<Res<VisualEffectsMode>>,
     sphere_query: Query<(Entity, &Transform, &Sphere)>,
     mut label_query: Query<
         (&BillboardLabel, &mut Node, &mut Visibility, &ComputedNode),
@@ -689,7 +689,7 @@ fn update_labels_screen_position(
     let win_w = window.width();
     let win_h = window.height();
     let is_effects_on = effects_mode
-        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .map(|m| *m == VisualEffectsMode::On)
         .unwrap_or(true);
 
     for (label, mut node, mut visibility, computed_node) in label_query.iter_mut() {
@@ -741,7 +741,7 @@ fn update_labels_screen_position(
 fn update_preview_label(
     queue: Option<Res<DispenserQueue>>,
     colorblind: Option<Res<ColorblindMode>>,
-    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
+    effects_mode: Option<Res<VisualEffectsMode>>,
     launcher_state: Res<LauncherState>,
     settings: Res<GameSettings>,
     camera_3d_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -778,7 +778,7 @@ fn update_preview_label(
         let win_w = window.width();
         let win_h = window.height();
         let is_effects_on = effects_mode
-            .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+            .map(|m| *m == VisualEffectsMode::On)
             .unwrap_or(true);
 
         let radius = get_radius(queue.current);
@@ -848,7 +848,7 @@ fn update_aim_guide_line(
     aim_line_mode: Res<AimLineMode>,
     launcher_state: Res<LauncherState>,
     dispenser_queue: Option<Res<DispenserQueue>>,
-    state: Option<Res<State<crate::game_state::AppState>>>,
+    state: Option<Res<State<akius_core::AppState>>>,
     mut query: Query<
         (
             &mut Transform,
@@ -862,7 +862,7 @@ fn update_aim_guide_line(
 ) {
     if let Ok((mut transform, mut visibility, mat_handle)) = query.single_mut() {
         let is_in_game = state
-            .map(|s| *s.get() == crate::game_state::AppState::InGame)
+            .map(|s| *s.get() == akius_core::AppState::InGame)
             .unwrap_or(false);
         if aim_line_mode.0 && is_in_game {
             crate::utils::set_visibility(&mut visibility, Visibility::Visible);
@@ -891,7 +891,7 @@ fn update_targeting_reticle(
     launcher_state: Res<LauncherState>,
     settings: Res<GameSettings>,
     dispenser_queue: Option<Res<DispenserQueue>>,
-    state: Option<Res<State<crate::game_state::AppState>>>,
+    state: Option<Res<State<akius_core::AppState>>>,
     mut query: Query<
         (
             &mut Transform,
@@ -906,7 +906,7 @@ fn update_targeting_reticle(
 ) {
     if let Ok((mut transform, mut visibility, mat_handle)) = query.single_mut() {
         let is_in_game = state
-            .map(|s| *s.get() == crate::game_state::AppState::InGame)
+            .map(|s| *s.get() == akius_core::AppState::InGame)
             .unwrap_or(false);
 
         if is_in_game {
@@ -982,9 +982,9 @@ pub fn compute_fulfillment_scale(elapsed: f32, duration: f32) -> f32 {
 }
 
 pub fn animate_merged_spawns(
-    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
-    cooldown_query: Query<&crate::physics::MergeCooldown>,
-    fulfilling_query: Query<&crate::game_state::Fulfilling>,
+    effects_mode: Option<Res<VisualEffectsMode>>,
+    cooldown_query: Query<&akius_core::physics_rules::MergeCooldown>,
+    fulfilling_query: Query<&akius_core::Fulfilling>,
     mut visual_query: Query<
         (Entity, &ChildOf, &mut Transform, Option<&SphereCore>),
         Or<(With<SphereVisual>, With<SphereCore>)>,
@@ -993,7 +993,7 @@ pub fn animate_merged_spawns(
     mut label_query: Query<(&BillboardLabel, &mut UiTransform)>,
 ) {
     let is_effects_on = effects_mode
-        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .map(|m| *m == VisualEffectsMode::On)
         .unwrap_or(true);
 
     for (_entity, child_of, mut transform, opt_core) in visual_query.iter_mut() {
@@ -1040,8 +1040,8 @@ pub fn animate_merged_spawns(
 }
 
 pub fn animate_fulfilling_spheres(
-    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
-    fulfillment: Option<Res<crate::game_state::ActiveFulfillment>>,
+    effects_mode: Option<Res<VisualEffectsMode>>,
+    fulfillment: Option<Res<akius_core::ActiveFulfillment>>,
     mut visual_query: Query<
         (&ChildOf, &mut Transform, Option<&SphereCore>),
         Or<(With<SphereVisual>, With<SphereCore>)>,
@@ -1053,7 +1053,7 @@ pub fn animate_fulfilling_spheres(
         return;
     };
     let is_effects_on = effects_mode
-        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .map(|m| *m == VisualEffectsMode::On)
         .unwrap_or(true);
 
     if let Some(fulfilling_entity) = fulfillment.entity {
@@ -1107,7 +1107,7 @@ pub fn cleanup_launcher_visuals(
 }
 
 fn update_sphere_effects(
-    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
+    effects_mode: Option<Res<VisualEffectsMode>>,
     mut core_query: Query<(&mut Visibility, &mut Transform), With<SphereCore>>,
     mut outer_query: Query<
         &mut Visibility,
@@ -1118,7 +1118,7 @@ fn update_sphere_effects(
     >,
 ) {
     let is_effects_on = effects_mode
-        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .map(|m| *m == VisualEffectsMode::On)
         .unwrap_or(true);
 
     // 1. Update outer shells (wireframes)
@@ -1224,14 +1224,14 @@ fn spawn_matrix_burst(
 
 pub fn handle_placeholder_bursts(
     mut commands: Commands,
-    effects_mode: Option<Res<crate::game_state::VisualEffectsMode>>,
+    effects_mode: Option<Res<VisualEffectsMode>>,
     particle_assets: Option<Res<MatrixParticleAssets>>,
-    mut merge_events: MessageReader<crate::game_state::MergeBurstEvent>,
-    mut fulfill_events: MessageReader<crate::game_state::FulfillmentBurstEvent>,
+    mut merge_events: MessageReader<akius_core::MergeBurstEvent>,
+    mut fulfill_events: MessageReader<akius_core::FulfillmentBurstEvent>,
     camera_query: Query<&GlobalTransform, With<Camera3d>>,
 ) {
     let is_effects_on = effects_mode
-        .map(|m| *m == crate::game_state::VisualEffectsMode::On)
+        .map(|m| *m == VisualEffectsMode::On)
         .unwrap_or(true);
     let Some(particle_assets) = particle_assets else {
         return;
@@ -1435,4 +1435,300 @@ mod tests {
         assert!(matches!(label_node.position_type, PositionType::Absolute));
         assert_eq!(*label_vis, Visibility::Hidden);
     }
+
+    #[test]
+    fn test_entity_count_soak() {
+        use akius_core::{ActiveFulfillment, Fulfilling, AppState, Score, ActiveOrder, GameSettings};
+        use bevy_rapier3d::prelude::CollisionEvent;
+        use crate::visuals::{
+            cleanup_orphaned_labels, handle_placeholder_bursts, on_sphere_added,
+            update_matrix_particles, MatrixParticleAssets, TierMaterials, TierMeshes,
+        };
+
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::state::app::StatesPlugin,
+            bevy::asset::AssetPlugin::default(),
+        ));
+
+        app.add_observer(on_sphere_added);
+
+        app.add_message::<CollisionEvent>();
+        app.add_message::<akius_core::physics_rules::MergeEvent>();
+        app.add_message::<akius_core::MergeBurstEvent>();
+        app.add_message::<akius_core::FulfillmentBurstEvent>();
+
+        app.insert_resource(Score {
+            total: 0,
+            peak_tier: 0,
+            completed_orders: 0,
+        });
+        app.insert_resource(ActiveOrder { target_tier: 6 });
+        app.insert_resource(ActiveFulfillment::default());
+        app.insert_resource(GameSettings {
+            launcher_z: 12.0,
+            ..default()
+        });
+        app.insert_resource(akius_core::ColorblindMode(true));
+
+        app.insert_resource(TierMaterials {
+            normal: std::array::from_fn(|_| Handle::default()),
+            core: std::array::from_fn(|_| Handle::default()),
+        });
+        app.insert_resource(TierMeshes {
+            outer: std::array::from_fn(|_| Handle::default()),
+            core: std::array::from_fn(|_| Handle::default()),
+        });
+        app.insert_resource(MatrixParticleAssets {
+            mesh: Handle::default(),
+            merge_material: Handle::default(),
+            fulfill_material: Handle::default(),
+        });
+
+        app.add_plugins(akius_core::physics_rules::PhysicsPlugin);
+        app.add_systems(
+            Update,
+            (
+                cleanup_orphaned_labels,
+                handle_placeholder_bursts,
+                update_matrix_particles,
+                akius_core::check_order_fulfillment,
+            )
+                .run_if(in_state(AppState::InGame)),
+        );
+
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f32(1.0 / 60.0),
+        ));
+
+        app.init_state::<AppState>();
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update();
+
+        let baseline_count = app.world_mut().query::<Entity>().iter(app.world()).count();
+
+        let entity_a = akius_core::physics_rules::spawn_sphere_entity(
+            &mut app.world_mut().commands(),
+            1,
+            Vec3::new(-0.2, 0.0, 0.0),
+            Vec3::ZERO,
+        )
+        .id();
+        let entity_b = akius_core::physics_rules::spawn_sphere_entity(
+            &mut app.world_mut().commands(),
+            1,
+            Vec3::new(0.2, 0.0, 0.0),
+            Vec3::ZERO,
+        )
+        .id();
+
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<Messages<CollisionEvent>>()
+            .write(CollisionEvent::Started(
+                entity_a,
+                entity_b,
+                bevy_rapier3d::rapier::geometry::CollisionEventFlags::empty(),
+            ));
+
+        for _ in 0..30 {
+            app.update();
+        }
+
+        let mut query = app.world_mut().query::<(Entity, &Sphere)>();
+        let mut found_tier2 = None;
+        for (entity, sphere) in query.iter(app.world()) {
+            if sphere.tier == 2 {
+                found_tier2 = Some(entity);
+            }
+        }
+        assert!(found_tier2.is_some(), "Tier 2 sphere should have spawned");
+        let tier2_entity = found_tier2.unwrap();
+
+        app.world_mut()
+            .resource_mut::<ActiveOrder>()
+            .target_tier = 2;
+
+        app.update();
+
+        assert!(
+            app.world().entity(tier2_entity).contains::<Fulfilling>(),
+            "Sphere should be in Fulfilling state"
+        );
+
+        for _ in 0..100 {
+            app.update();
+        }
+
+        assert!(app.world().get_entity(tier2_entity).is_err());
+
+        for _ in 0..150 {
+            app.update();
+        }
+
+        let final_count = app.world_mut().query::<Entity>().iter(app.world()).count();
+
+        assert_eq!(
+            final_count, baseline_count,
+            "Leaked entities found! Baseline: {}, Final: {}",
+            baseline_count, final_count
+        );
+    }
+
+    fn auto_degrade_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<akius_core::AppState>();
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(VisualEffectsMode::On);
+        app.add_systems(Update, auto_degrade_visual_effects);
+        app.world_mut()
+            .resource_mut::<NextState<akius_core::AppState>>()
+            .set(akius_core::AppState::InGame);
+        app.update();
+        app
+    }
+
+    fn run_frames(app: &mut App, frames: usize, dt: f32) {
+        use std::time::Duration;
+        for _ in 0..frames {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_secs_f32(dt));
+            app.update();
+        }
+    }
+
+    #[test]
+    fn test_auto_degrade_fires_on_sustained_slowness() {
+        let mut app = auto_degrade_test_app();
+        run_frames(&mut app, 110, 0.04);
+        assert_eq!(
+            *app.world().resource::<VisualEffectsMode>(),
+            VisualEffectsMode::Off
+        );
+    }
+
+    #[test]
+    fn test_auto_degrade_ignores_healthy_and_spiky_frames() {
+        let mut app = auto_degrade_test_app();
+        run_frames(&mut app, 600, 1.0 / 60.0);
+        assert_eq!(
+            *app.world().resource::<VisualEffectsMode>(),
+            VisualEffectsMode::On
+        );
+        run_frames(&mut app, 5, 5.0);
+        assert_eq!(
+            *app.world().resource::<VisualEffectsMode>(),
+            VisualEffectsMode::On
+        );
+    }
+}
+
+
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisualEffectsMode {
+    #[default]
+    On,
+    Off,
+}
+
+pub fn auto_degrade_visual_effects(
+    time: Res<Time>,
+    state: Res<State<akius_core::AppState>>,
+    mut effects_mode: ResMut<VisualEffectsMode>,
+    mut over_budget: Local<f32>,
+    mut already_fired: Local<bool>,
+) {
+    const FRAME_BUDGET: f32 = 1.0 / 30.0;
+    const TRIGGER_AFTER: f32 = 3.0;
+
+    if *already_fired || *effects_mode == VisualEffectsMode::Off {
+        return;
+    }
+    if *state.get() != akius_core::AppState::InGame {
+        return;
+    }
+
+    let dt = time.delta_secs();
+    if dt > 1.0 {
+        return;
+    }
+
+    if dt > FRAME_BUDGET {
+        *over_budget += dt.min(0.1);
+    } else {
+        *over_budget = (*over_budget - dt).max(0.0);
+    }
+
+    if *over_budget >= TRIGGER_AFTER {
+        *effects_mode = VisualEffectsMode::Off;
+        *already_fired = true;
+        info!(
+            "Sustained low frame rate detected — visual effects disabled automatically \
+             (press F or the FX button to re-enable)."
+        );
+    }
+}
+
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HighScore(pub u32);
+
+#[cfg(target_arch = "wasm32")]
+pub fn save_high_score_to_local_storage(val: u32) {
+    if let Some(window) = web_sys::window() {
+        if let Ok(Some(storage)) = window.local_storage() {
+            let _ = storage.set_item("akius_high_score", &val.to_string());
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn save_high_score_to_local_storage(_val: u32) {}
+
+#[cfg(target_arch = "wasm32")]
+pub fn load_high_score_from_local_storage() -> u32 {
+    if let Some(window) = web_sys::window() {
+        if let Ok(Some(storage)) = window.local_storage() {
+            if let Ok(Some(val_str)) = storage.get_item("akius_high_score") {
+                if let Ok(val) = val_str.parse::<u32>() {
+                    return val;
+                }
+            }
+        }
+    }
+    0
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_high_score_from_local_storage() -> u32 {
+    0
+}
+
+const HIGH_SCORE_SAVE_INTERVAL: f32 = 5.0;
+
+pub fn update_high_score(
+    time: Res<Time>,
+    score: Res<akius_core::Score>,
+    mut high_score: ResMut<HighScore>,
+    mut dirty: Local<bool>,
+    mut next_save_at: Local<f32>,
+) {
+    if score.total > high_score.0 {
+        high_score.0 = score.total;
+        *dirty = true;
+    }
+    if *dirty && time.elapsed_secs() >= *next_save_at {
+        save_high_score_to_local_storage(high_score.0);
+        *dirty = false;
+        *next_save_at = time.elapsed_secs() + HIGH_SCORE_SAVE_INTERVAL;
+    }
+}
+
+pub fn flush_high_score(high_score: Res<HighScore>) {
+    save_high_score_to_local_storage(high_score.0);
 }
