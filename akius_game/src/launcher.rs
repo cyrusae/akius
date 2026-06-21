@@ -1,9 +1,9 @@
-use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
-use akius_core::*;
 use akius_core::Sphere;
 use akius_core::core_math;
 use akius_core::physics_rules;
+use akius_core::*;
+use bevy::prelude::*;
+use bevy_rapier3d::prelude::*;
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct LauncherPreview;
@@ -41,10 +41,7 @@ impl Plugin for LauncherPlugin {
             .init_resource::<QueuedInputs>()
             .add_systems(
                 Update,
-                (
-                    gather_launcher_inputs,
-                    update_launcher_preview_visuals,
-                )
+                (gather_launcher_inputs, update_launcher_preview_visuals)
                     .run_if(in_state(AppState::InGame)),
             )
             .add_systems(
@@ -74,10 +71,10 @@ pub fn gather_launcher_inputs(
     mut launcher_state: ResMut<LauncherState>,
     replay_state: Option<Res<ReplayState>>,
 ) {
-    if let Some(state) = replay_state {
-        if matches!(*state, ReplayState::Playing { .. }) {
-            return;
-        }
+    if let Some(state) = replay_state
+        && matches!(*state, ReplayState::Playing { .. })
+    {
+        return;
     }
     let half_width = settings.arena_width * 0.5;
     let current_tier = dispenser_queue.map(|dq| dq.current).unwrap_or(1);
@@ -95,17 +92,16 @@ pub fn gather_launcher_inputs(
         current_input_position = window.cursor_position();
     }
 
-    if let Some(input_pos) = current_input_position {
-        if let Ok((camera, camera_transform)) = camera_query.single() {
-            if let Ok(ray) = camera.viewport_to_world(camera_transform, input_pos) {
-                let dir_y = ray.direction.y;
-                if dir_y.abs() >= 1e-6 {
-                    let t = -ray.origin.y / dir_y;
-                    if t >= 0.0 {
-                        let intersection_point = ray.origin + t * *ray.direction;
-                        new_target_x = Some(intersection_point.x.clamp(-limit_x, limit_x));
-                    }
-                }
+    if let Some(input_pos) = current_input_position
+        && let Ok((camera, camera_transform)) = camera_query.single()
+        && let Ok(ray) = camera.viewport_to_world(camera_transform, input_pos)
+    {
+        let dir_y = ray.direction.y;
+        if dir_y.abs() >= 1e-6 {
+            let t = -ray.origin.y / dir_y;
+            if t >= 0.0 {
+                let intersection_point = ray.origin + t * *ray.direction;
+                new_target_x = Some(intersection_point.x.clamp(-limit_x, limit_x));
             }
         }
     }
@@ -176,10 +172,7 @@ pub fn gather_launcher_inputs(
 pub fn update_launcher_aiming(
     settings: Res<GameSettings>,
     dispenser_queue: Option<Res<DispenserQueue>>,
-    sphere_query: Query<
-        (&Transform, &Sphere, Option<&Velocity>),
-        Without<Fulfilling>,
-    >,
+    sphere_query: Query<(&Transform, &Sphere, Option<&Velocity>), Without<Fulfilling>>,
     mut launcher_state: ResMut<LauncherState>,
     queued_inputs: Res<QueuedInputs>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -213,10 +206,10 @@ pub fn update_launcher_aiming(
 
     intervals.clear();
     for (sphere_transform, sphere, velocity) in sphere_query.iter() {
-        if let Some(vel) = velocity {
-            if vel.linear.z < -0.5 {
-                continue;
-            }
+        if let Some(vel) = velocity
+            && vel.linear.z < -0.5
+        {
+            continue;
         }
         let sphere_radius = core_math::get_radius(sphere.tier);
         let dz = (settings.launcher_z - sphere_transform.translation.z).abs();
@@ -345,15 +338,14 @@ pub fn handle_launch_input(
                 launch_velocity,
             );
 
-            if let Some(t) = tick {
-                if let Some(ref mut state) = replay_state {
-                    if let ReplayState::Recording { record } = &mut **state {
-                        record.shots.push(ShotRecord {
-                            tick: t.0,
-                            x: launcher_state.active_x,
-                        });
-                    }
-                }
+            if let Some(t) = tick
+                && let Some(ref mut state) = replay_state
+                && let ReplayState::Recording { record } = &mut **state
+            {
+                record.shots.push(ShotRecord {
+                    tick: t.0,
+                    x: launcher_state.active_x,
+                });
             }
 
             if let Some(mut queue) = dispenser_queue {
@@ -425,7 +417,10 @@ mod tests {
         window.set_cursor_position(Some(Vec2::new(400.0, 300.0)));
         app.world_mut().spawn(window);
 
-        app.add_systems(Update, (gather_launcher_inputs, update_launcher_aiming).chain());
+        app.add_systems(
+            Update,
+            (gather_launcher_inputs, update_launcher_aiming).chain(),
+        );
         app.update();
 
         let state = app.world().resource::<LauncherState>();
@@ -494,7 +489,10 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         app.init_resource::<NextSphereId>();
         app.init_resource::<GameRng>();
-        app.add_systems(Update, (gather_launcher_inputs, handle_launch_input).chain());
+        app.add_systems(
+            Update,
+            (gather_launcher_inputs, handle_launch_input).chain(),
+        );
 
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
@@ -544,7 +542,10 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         app.init_resource::<NextSphereId>();
         app.init_resource::<GameRng>();
-        app.add_systems(Update, (gather_launcher_inputs, handle_launch_input).chain());
+        app.add_systems(
+            Update,
+            (gather_launcher_inputs, handle_launch_input).chain(),
+        );
 
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
@@ -552,12 +553,7 @@ mod tests {
         app.update();
         app.update();
 
-        assert_eq!(
-            app.world()
-                .resource::<DispenserQueue>()
-                .current,
-            2
-        );
+        assert_eq!(app.world().resource::<DispenserQueue>().current, 2);
 
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
@@ -568,12 +564,7 @@ mod tests {
         app.update();
         app.update();
 
-        assert_eq!(
-            app.world()
-                .resource::<DispenserQueue>()
-                .current,
-            2
-        );
+        assert_eq!(app.world().resource::<DispenserQueue>().current, 2);
     }
 
     #[test]
@@ -596,7 +587,10 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         app.init_resource::<NextSphereId>();
         app.init_resource::<GameRng>();
-        app.add_systems(Update, (gather_launcher_inputs, handle_launch_input).chain());
+        app.add_systems(
+            Update,
+            (gather_launcher_inputs, handle_launch_input).chain(),
+        );
 
         app.world_mut().spawn(physics_rules::MergeCooldown {
             timer: Timer::from_seconds(0.5, TimerMode::Once),
@@ -608,12 +602,7 @@ mod tests {
         app.update();
         app.update();
 
-        assert_eq!(
-            app.world()
-                .resource::<DispenserQueue>()
-                .current,
-            1
-        );
+        assert_eq!(app.world().resource::<DispenserQueue>().current, 1);
     }
 
     #[test]
@@ -671,12 +660,7 @@ mod tests {
             });
         app.update();
 
-        assert_eq!(
-            app.world()
-                .resource::<DispenserQueue>()
-                .current,
-            1
-        );
+        assert_eq!(app.world().resource::<DispenserQueue>().current, 1);
 
         app.world_mut()
             .resource_mut::<Messages<TouchInput>>()
@@ -700,12 +684,7 @@ mod tests {
             });
         app.update();
 
-        assert_eq!(
-            app.world()
-                .resource::<DispenserQueue>()
-                .current,
-            2
-        );
+        assert_eq!(app.world().resource::<DispenserQueue>().current, 2);
     }
 
     #[test]
@@ -716,7 +695,7 @@ mod tests {
         app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default());
         app.add_plugins(physics_rules::PhysicsPlugin);
         app.add_plugins(LauncherPlugin);
-        
+
         app.add_plugins(bevy::state::app::StatesPlugin);
         app.init_state::<AppState>();
 
@@ -734,7 +713,7 @@ mod tests {
         app.insert_resource(Score::default());
         app.insert_resource(ActiveOrder { target_tier: 6 });
         app.insert_resource(ActiveFulfillment::default());
-        
+
         app.insert_resource(DispenserQueue {
             current: 1,
             next: 2,
@@ -779,17 +758,17 @@ mod tests {
 
         let total_score = app.world().resource::<Score>().total;
         let peak_tier = app.world().resource::<Score>().peak_tier;
-        
+
         let mut query = app.world_mut().query::<(Entity, &Sphere, &Transform)>();
         let spheres = query.iter(app.world()).collect::<Vec<_>>();
-        
+
         assert_eq!(total_score, 200);
         assert_eq!(peak_tier, 2);
 
         assert_eq!(spheres.len(), 1);
         let (_entity, sphere, transform) = spheres[0];
         assert_eq!(sphere.tier, 2);
-        
+
         // Assert exact, byte-identical coordinates that demonstrate enhanced-determinism
         // Any mutation to physics damping, speed, or collision logic will break these values.
         assert_eq!(transform.translation.x, 0.0);

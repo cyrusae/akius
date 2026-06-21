@@ -1,10 +1,10 @@
+use crate::launcher::{LauncherPreview, LauncherState};
+use akius_core::core_math::get_radius;
+use akius_core::{AimLineMode, ColorblindMode, DispenserQueue, GameSettings, Sphere};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 use bevy_rapier3d::prelude::Collider;
-use akius_core::core_math::get_radius;
-use akius_core::{AimLineMode, ColorblindMode, DispenserQueue, GameSettings, Sphere};
-use crate::launcher::{LauncherPreview, LauncherState};
 
 // ---------------------------------------------------------------------------
 // Tier color palette — vibrant rainbow gradient, designed to be distinct.
@@ -874,12 +874,12 @@ fn update_aim_guide_line(
             // frame is needless churn. The animation time comes from `globals.time`
             // inside the shader instead.
             let current_tier = dispenser_queue.as_ref().map(|dq| dq.current).unwrap_or(1);
-            if *last_tier != Some(current_tier) {
-                if let Some(mat) = laser_materials.get_mut(&mat_handle.0) {
-                    let color = TIER_COLORS[tier_index(current_tier)];
-                    mat.uniforms.color = LinearRgba::from(color);
-                    *last_tier = Some(current_tier);
-                }
+            if *last_tier != Some(current_tier)
+                && let Some(mat) = laser_materials.get_mut(&mat_handle.0)
+            {
+                let color = TIER_COLORS[tier_index(current_tier)];
+                mat.uniforms.color = LinearRgba::from(color);
+                *last_tier = Some(current_tier);
             }
         } else {
             crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
@@ -934,12 +934,12 @@ fn update_targeting_reticle(
 
                 // Only mutate the material asset on tier changes (see update_aim_guide_line);
                 // rotation/pulse animation is driven by `globals.time` in the shader.
-                if *last_tier != Some(current_tier) {
-                    if let Some(mat) = reticle_materials.get_mut(&mat_handle.0) {
-                        let color = TIER_COLORS[tier_index(current_tier)];
-                        mat.uniforms.color = LinearRgba::from(color);
-                        *last_tier = Some(current_tier);
-                    }
+                if *last_tier != Some(current_tier)
+                    && let Some(mat) = reticle_materials.get_mut(&mat_handle.0)
+                {
+                    let color = TIER_COLORS[tier_index(current_tier)];
+                    mat.uniforms.color = LinearRgba::from(color);
+                    *last_tier = Some(current_tier);
                 }
             } else {
                 crate::utils::set_visibility(&mut visibility, Visibility::Hidden);
@@ -1438,12 +1438,14 @@ mod tests {
 
     #[test]
     fn test_entity_count_soak() {
-        use akius_core::{ActiveFulfillment, Fulfilling, AppState, Score, ActiveOrder, GameSettings};
-        use bevy_rapier3d::prelude::CollisionEvent;
         use crate::visuals::{
-            cleanup_orphaned_labels, handle_placeholder_bursts, on_sphere_added,
-            update_matrix_particles, MatrixParticleAssets, TierMaterials, TierMeshes,
+            MatrixParticleAssets, TierMaterials, TierMeshes, cleanup_orphaned_labels,
+            handle_placeholder_bursts, on_sphere_added, update_matrix_particles,
         };
+        use akius_core::{
+            ActiveFulfillment, ActiveOrder, AppState, Fulfilling, GameSettings, Score,
+        };
+        use bevy_rapier3d::prelude::CollisionEvent;
 
         let mut app = App::new();
         app.add_plugins((
@@ -1551,9 +1553,7 @@ mod tests {
         assert!(found_tier2.is_some(), "Tier 2 sphere should have spawned");
         let tier2_entity = found_tier2.unwrap();
 
-        app.world_mut()
-            .resource_mut::<ActiveOrder>()
-            .target_tier = 2;
+        app.world_mut().resource_mut::<ActiveOrder>().target_tier = 2;
 
         app.update();
 
@@ -1630,7 +1630,6 @@ mod tests {
         );
     }
 }
-
 
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VisualEffectsMode {

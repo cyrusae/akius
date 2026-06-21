@@ -1,5 +1,5 @@
-use akius_core::{ActiveOrder, AimLineMode, ColorblindMode, DispenserQueue, Score};
 use crate::visuals::TIER_COLORS;
+use akius_core::{ActiveOrder, AimLineMode, ColorblindMode, DispenserQueue, Score};
 use bevy::prelude::*;
 
 #[derive(Component)]
@@ -487,10 +487,10 @@ fn update_order_hud(
     };
     let color = TIER_COLORS[crate::visuals::tier_index(active_order.target_tier)];
 
-    if let Ok(mut bg) = swatch_query.single_mut() {
-        if bg.0 != color {
-            bg.0 = color;
-        }
+    if let Ok(mut bg) = swatch_query.single_mut()
+        && bg.0 != color
+    {
+        bg.0 = color;
     }
     if let Ok(mut text) = text_query.single_mut() {
         let new_text = active_order.target_tier.to_string();
@@ -528,7 +528,9 @@ fn update_effects_button_text(
     effects_mode: Res<crate::visuals::VisualEffectsMode>,
     mut query: Query<(&mut Text, &mut TextFont), With<EffectsButtonText>>,
 ) {
-    let Ok(window) = window_query.single() else { return; };
+    let Ok(window) = window_query.single() else {
+        return;
+    };
     let is_vertical = window.width() < window.height();
     if let Ok((mut text, mut font)) = query.single_mut() {
         let label = "FX";
@@ -556,10 +558,10 @@ fn update_next_sphere_hud(
     };
     let color = TIER_COLORS[crate::visuals::tier_index(queue.next)];
 
-    if let Ok(mut bg) = swatch_query.single_mut() {
-        if bg.0 != color {
-            bg.0 = color;
-        }
+    if let Ok(mut bg) = swatch_query.single_mut()
+        && bg.0 != color
+    {
+        bg.0 = color;
     }
     if let Ok(mut text) = text_query.single_mut() {
         let new_text = queue.next.to_string();
@@ -597,7 +599,9 @@ fn update_colorblind_button_text(
     colorblind: Res<ColorblindMode>,
     mut query: Query<(&mut Text, &mut TextFont), With<ColorblindButtonText>>,
 ) {
-    let Ok(window) = window_query.single() else { return; };
+    let Ok(window) = window_query.single() else {
+        return;
+    };
     let is_vertical = window.width() < window.height();
     if let Ok((mut text, mut font)) = query.single_mut() {
         let label = if is_vertical { "Num" } else { "Numbers" };
@@ -1021,7 +1025,9 @@ fn update_aim_guide_button_text(
     aim_line_mode: Res<AimLineMode>,
     mut query: Query<(&mut Text, &mut TextFont), With<AimGuideButtonText>>,
 ) {
-    let Ok(window) = window_query.single() else { return; };
+    let Ok(window) = window_query.single() else {
+        return;
+    };
     let is_vertical = window.width() < window.height();
     if let Ok((mut text, mut font)) = query.single_mut() {
         let label = if is_vertical { "Aim" } else { "Aim Line" };
@@ -1088,9 +1094,33 @@ fn responsive_hud_layout(
             Without<HudCenterCol>,
         ),
     >,
-    mut aim_btn_query: Query<&mut Node, (With<AimGuideButton>, Without<HudBottomRow>, Without<EffectsButton>, Without<ColorblindButton>)>,
-    mut fx_btn_query: Query<&mut Node, (With<EffectsButton>, Without<HudBottomRow>, Without<AimGuideButton>, Without<ColorblindButton>)>,
-    mut cb_btn_query: Query<&mut Node, (With<ColorblindButton>, Without<HudBottomRow>, Without<AimGuideButton>, Without<EffectsButton>)>,
+    mut aim_btn_query: Query<
+        &mut Node,
+        (
+            With<AimGuideButton>,
+            Without<HudBottomRow>,
+            Without<EffectsButton>,
+            Without<ColorblindButton>,
+        ),
+    >,
+    mut fx_btn_query: Query<
+        &mut Node,
+        (
+            With<EffectsButton>,
+            Without<HudBottomRow>,
+            Without<AimGuideButton>,
+            Without<ColorblindButton>,
+        ),
+    >,
+    mut cb_btn_query: Query<
+        &mut Node,
+        (
+            With<ColorblindButton>,
+            Without<HudBottomRow>,
+            Without<AimGuideButton>,
+            Without<EffectsButton>,
+        ),
+    >,
 ) {
     let Ok(window) = window_query.single() else {
         return;
@@ -1170,16 +1200,28 @@ fn responsive_hud_layout(
     };
 
     if let Ok(mut node) = aim_btn_query.single_mut() {
-        if node.width != btn_width { node.width = btn_width; }
-        if node.height != btn_height { node.height = btn_height; }
+        if node.width != btn_width {
+            node.width = btn_width;
+        }
+        if node.height != btn_height {
+            node.height = btn_height;
+        }
     }
     if let Ok(mut node) = fx_btn_query.single_mut() {
-        if node.width != btn_width { node.width = btn_width; }
-        if node.height != btn_height { node.height = btn_height; }
+        if node.width != btn_width {
+            node.width = btn_width;
+        }
+        if node.height != btn_height {
+            node.height = btn_height;
+        }
     }
     if let Ok(mut node) = cb_btn_query.single_mut() {
-        if node.width != btn_width { node.width = btn_width; }
-        if node.height != btn_height { node.height = btn_height; }
+        if node.width != btn_width {
+            node.width = btn_width;
+        }
+        if node.height != btn_height {
+            node.height = btn_height;
+        }
     }
 
     if let Ok(mut left_col) = left_col_query.single_mut() {
@@ -1239,10 +1281,11 @@ mod tests {
             *app.world().resource::<State<AppState>>().get(),
             AppState::MainMenu
         );
-        assert!(!app
-            .world_mut()
-            .run_system_once(in_game_over_or_win_state)
-            .unwrap());
+        assert!(
+            !app.world_mut()
+                .run_system_once(in_game_over_or_win_state)
+                .unwrap()
+        );
 
         // Under InGame, should be false
         app.world_mut()
@@ -1253,10 +1296,11 @@ mod tests {
             *app.world().resource::<State<AppState>>().get(),
             AppState::InGame
         );
-        assert!(!app
-            .world_mut()
-            .run_system_once(in_game_over_or_win_state)
-            .unwrap());
+        assert!(
+            !app.world_mut()
+                .run_system_once(in_game_over_or_win_state)
+                .unwrap()
+        );
 
         // Under GameOver, should be true
         app.world_mut()
@@ -1267,10 +1311,11 @@ mod tests {
             *app.world().resource::<State<AppState>>().get(),
             AppState::GameOver
         );
-        assert!(app
-            .world_mut()
-            .run_system_once(in_game_over_or_win_state)
-            .unwrap());
+        assert!(
+            app.world_mut()
+                .run_system_once(in_game_over_or_win_state)
+                .unwrap()
+        );
 
         // Under Win, should be true
         app.world_mut()
@@ -1281,9 +1326,10 @@ mod tests {
             *app.world().resource::<State<AppState>>().get(),
             AppState::Win
         );
-        assert!(app
-            .world_mut()
-            .run_system_once(in_game_over_or_win_state)
-            .unwrap());
+        assert!(
+            app.world_mut()
+                .run_system_once(in_game_over_or_win_state)
+                .unwrap()
+        );
     }
 }

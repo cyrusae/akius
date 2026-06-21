@@ -34,8 +34,8 @@ pub fn get_random_dispensed_tier<R: rand::Rng>(rng: &mut R) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn test_radius_scaling() {

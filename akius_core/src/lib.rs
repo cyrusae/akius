@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::{ActiveEvents, RigidBody, Velocity};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 pub mod core_math;
 
@@ -403,11 +403,12 @@ mod tests {
         app.update();
 
         assert!(app.world().get_entity(sphere_entity).is_ok());
-        assert!(app
-            .world()
-            .entity(sphere_entity)
-            .get::<Fulfilling>()
-            .is_some());
+        assert!(
+            app.world()
+                .entity(sphere_entity)
+                .get::<Fulfilling>()
+                .is_some()
+        );
 
         app.world_mut()
             .resource_mut::<Time>()
@@ -462,11 +463,12 @@ mod tests {
             .id();
 
         app.update();
-        assert!(app
-            .world()
-            .entity(sphere_entity)
-            .get::<LossTracker>()
-            .is_some());
+        assert!(
+            app.world()
+                .entity(sphere_entity)
+                .get::<LossTracker>()
+                .is_some()
+        );
 
         app.world_mut()
             .resource_mut::<Time>()

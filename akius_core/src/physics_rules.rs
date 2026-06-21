@@ -1,8 +1,7 @@
-use bevy::prelude::*;
+use super::Sphere;
+use super::*;
 use bevy_rapier3d::prelude::*;
 use std::collections::HashSet;
-use super::*;
-use super::Sphere;
 
 #[derive(Component, Debug, Clone)]
 pub struct MergeCooldown {
@@ -49,10 +48,7 @@ impl Plugin for PhysicsPlugin {
                 )
                     .after(PhysicsSet::Writeback),
             )
-            .add_systems(
-                OnEnter(AppState::GameOver),
-                unlock_all_spheres_on_game_over,
-            );
+            .add_systems(OnEnter(AppState::GameOver), unlock_all_spheres_on_game_over);
     }
 }
 
@@ -66,7 +62,7 @@ pub fn spawn_sphere_entity<'a>(
     let radius = core_math::get_radius(tier);
     translation.y = radius;
     let density = 15.0 / (tier as f32).powf(0.8);
-    let cmd = commands.spawn((
+    commands.spawn((
         Sphere { tier },
         SphereId(id),
         Transform::from_translation(translation),
@@ -94,8 +90,7 @@ pub fn spawn_sphere_entity<'a>(
             | LockedAxes::ROTATION_LOCKED_X
             | LockedAxes::ROTATION_LOCKED_Y
             | LockedAxes::ROTATION_LOCKED_Z,
-    ));
-    cmd
+    ))
 }
 
 pub fn detect_collisions(
@@ -111,15 +106,14 @@ pub fn detect_collisions(
     mut merge_events: MessageWriter<MergeEvent>,
 ) {
     for event in collision_events.read() {
-        if let CollisionEvent::Started(e1, e2, _) = *event {
-            if let (Ok(s1), Ok(s2)) = (sphere_query.get(e1), sphere_query.get(e2)) {
-                if s1.tier == s2.tier {
-                    merge_events.write(MergeEvent {
-                        entity_a: e1,
-                        entity_b: e2,
-                    });
-                }
-            }
+        if let CollisionEvent::Started(e1, e2, _) = *event
+            && let (Ok(s1), Ok(s2)) = (sphere_query.get(e1), sphere_query.get(e2))
+            && s1.tier == s2.tier
+        {
+            merge_events.write(MergeEvent {
+                entity_a: e1,
+                entity_b: e2,
+            });
         }
     }
 }
@@ -191,57 +185,57 @@ pub fn resolve_merges(
             continue;
         }
 
-        if let (Ok((s1, t1, v1)), Ok((s2, t2, v2))) = (sphere_query.get(e1), sphere_query.get(e2)) {
-            if s1.tier == s2.tier {
-                let current_tier = s1.tier;
-                if current_tier >= 9 {
-                    continue;
-                }
+        if let (Ok((s1, t1, v1)), Ok((s2, t2, v2))) = (sphere_query.get(e1), sphere_query.get(e2))
+            && s1.tier == s2.tier
+        {
+            let current_tier = s1.tier;
+            if current_tier >= 9 {
+                continue;
+            }
 
-                merged_this_frame.insert(e1);
-                merged_this_frame.insert(e2);
-                commands
-                    .entity(e1)
-                    .insert(DespawnDelay { frames: 1 })
-                    .remove::<Collider>()
-                    .remove::<RigidBody>()
-                    .remove::<ActiveEvents>()
-                    .remove::<Velocity>();
-                commands
-                    .entity(e2)
-                    .insert(DespawnDelay { frames: 1 })
-                    .remove::<Collider>()
-                    .remove::<RigidBody>()
-                    .remove::<ActiveEvents>()
-                    .remove::<Velocity>();
+            merged_this_frame.insert(e1);
+            merged_this_frame.insert(e2);
+            commands
+                .entity(e1)
+                .insert(DespawnDelay { frames: 1 })
+                .remove::<Collider>()
+                .remove::<RigidBody>()
+                .remove::<ActiveEvents>()
+                .remove::<Velocity>();
+            commands
+                .entity(e2)
+                .insert(DespawnDelay { frames: 1 })
+                .remove::<Collider>()
+                .remove::<RigidBody>()
+                .remove::<ActiveEvents>()
+                .remove::<Velocity>();
 
-                let next_tier = current_tier + 1;
-                let midpoint = (t1.translation + t2.translation) * 0.5;
+            let next_tier = current_tier + 1;
+            let midpoint = (t1.translation + t2.translation) * 0.5;
 
-                let merged_velocity = (v1.linear + v2.linear) * 0.5 * 0.5;
+            let merged_velocity = (v1.linear + v2.linear) * 0.5 * 0.5;
 
-                let id = next_id.0;
-                next_id.0 += 1;
-                let mut cmd =
-                    spawn_sphere_entity(&mut commands, id, next_tier, midpoint, merged_velocity);
-                cmd.insert(MergeCooldown {
-                    timer: Timer::from_seconds(0.35, TimerMode::Once),
-                });
+            let id = next_id.0;
+            next_id.0 += 1;
+            let mut cmd =
+                spawn_sphere_entity(&mut commands, id, next_tier, midpoint, merged_velocity);
+            cmd.insert(MergeCooldown {
+                timer: Timer::from_seconds(0.35, TimerMode::Once),
+            });
 
-                merge_burst_events.write(MergeBurstEvent {
-                    position: midpoint,
-                    tier: next_tier,
-                });
+            merge_burst_events.write(MergeBurstEvent {
+                position: midpoint,
+                tier: next_tier,
+            });
 
-                score.total += core_math::get_merge_points(next_tier);
-                if next_tier > score.peak_tier {
-                    score.peak_tier = next_tier;
-                }
+            score.total += core_math::get_merge_points(next_tier);
+            if next_tier > score.peak_tier {
+                score.peak_tier = next_tier;
+            }
 
-                if next_tier == 9 {
-                    info!("Secret Win Condition reached! Transitioning to AppState::Win");
-                    next_state.set(AppState::Win);
-                }
+            if next_tier == 9 {
+                info!("Secret Win Condition reached! Transitioning to AppState::Win");
+                next_state.set(AppState::Win);
             }
         }
     }
@@ -307,12 +301,11 @@ pub fn spill_spheres(
 ) {
     let launcher_z = settings.launcher_z;
     for (entity, transform, locked_axes) in sphere_query.iter() {
-        if transform.translation.z > launcher_z {
-            if let Some(axes) = locked_axes {
-                if *axes != LockedAxes::empty() {
-                    commands.entity(entity).insert(LockedAxes::empty());
-                }
-            }
+        if transform.translation.z > launcher_z
+            && let Some(axes) = locked_axes
+            && *axes != LockedAxes::empty()
+        {
+            commands.entity(entity).insert(LockedAxes::empty());
         }
     }
 }
@@ -759,15 +752,15 @@ mod tests {
         .id();
         let entity_b = spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            2, // ID
-            1, // Tier
+            2,                         // ID
+            1,                         // Tier
             Vec3::new(1.07, 0.0, 0.0), // exactly 1.07 distance
             Vec3::ZERO,
         )
         .id();
 
         app.update();
-        
+
         // They should NOT merge
         assert!(app.world().get_entity(entity_a).is_ok());
         assert!(app.world().get_entity(entity_b).is_ok());
@@ -787,8 +780,8 @@ mod tests {
         .id();
         let entity_d = spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            2, // ID
-            1, // Tier
+            2,                          // ID
+            1,                          // Tier
             Vec3::new(1.069, 0.0, 0.0), // slightly less than 1.07
             Vec3::ZERO,
         )

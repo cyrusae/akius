@@ -1,14 +1,14 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
+mod crt_post_process;
 mod hud;
 mod launcher;
 mod utils;
 mod visuals;
-mod crt_post_process;
 
+use akius_core::*;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
-use akius_core::*;
 
 fn main() {
     App::new()
@@ -56,17 +56,10 @@ fn main() {
         ))
         .add_message::<FulfillmentBurstEvent>()
         .add_systems(Startup, setup_camera_and_light)
-        .add_systems(
-            OnEnter(AppState::InGame),
-            reset_game_state,
-        )
+        .add_systems(OnEnter(AppState::InGame), reset_game_state)
         .add_systems(
             FixedUpdate,
-            (
-                check_loss_condition,
-                check_order_fulfillment,
-            )
-                .run_if(in_state(AppState::InGame)),
+            (check_loss_condition, check_order_fulfillment).run_if(in_state(AppState::InGame)),
         )
         .add_systems(
             Update,
@@ -76,14 +69,8 @@ fn main() {
                 adjust_camera_fov,
             ),
         )
-        .add_systems(
-            OnEnter(AppState::GameOver),
-            visuals::flush_high_score,
-        )
-        .add_systems(
-            OnEnter(AppState::Win),
-            visuals::flush_high_score,
-        )
+        .add_systems(OnEnter(AppState::GameOver), visuals::flush_high_score)
+        .add_systems(OnEnter(AppState::Win), visuals::flush_high_score)
         .run();
 }
 
