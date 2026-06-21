@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::{ActiveEvents, RigidBody, Velocity};
 use rand::SeedableRng;
@@ -180,6 +182,7 @@ pub fn check_loss_condition(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn check_order_fulfillment(
     mut commands: Commands,
     time: Res<Time>,
