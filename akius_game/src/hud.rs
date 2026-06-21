@@ -1044,83 +1044,17 @@ fn update_aim_guide_button_text(
 
 fn responsive_hud_layout(
     window_query: Query<&Window>,
-    mut top_row_query: Query<
+    mut nodes_query: Query<(
         &mut Node,
-        (
-            With<HudTopRow>,
-            Without<HudBottomRow>,
-            Without<HudLeftCol>,
-            Without<HudCenterCol>,
-            Without<HudRightCol>,
-        ),
-    >,
-    mut bottom_row_query: Query<
-        &mut Node,
-        (
-            With<HudBottomRow>,
-            Without<HudTopRow>,
-            Without<HudLeftCol>,
-            Without<HudCenterCol>,
-            Without<HudRightCol>,
-        ),
-    >,
-    mut left_col_query: Query<
-        &mut Node,
-        (
-            With<HudLeftCol>,
-            Without<HudTopRow>,
-            Without<HudBottomRow>,
-            Without<HudCenterCol>,
-            Without<HudRightCol>,
-        ),
-    >,
-    mut center_col_query: Query<
-        &mut Node,
-        (
-            With<HudCenterCol>,
-            Without<HudTopRow>,
-            Without<HudBottomRow>,
-            Without<HudLeftCol>,
-            Without<HudRightCol>,
-        ),
-    >,
-    mut right_col_query: Query<
-        &mut Node,
-        (
-            With<HudRightCol>,
-            Without<HudTopRow>,
-            Without<HudBottomRow>,
-            Without<HudLeftCol>,
-            Without<HudCenterCol>,
-        ),
-    >,
-    mut aim_btn_query: Query<
-        &mut Node,
-        (
-            With<AimGuideButton>,
-            Without<HudBottomRow>,
-            Without<EffectsButton>,
-            Without<ColorblindButton>,
-        ),
-    >,
-    mut fx_btn_query: Query<
-        &mut Node,
-        (
-            With<EffectsButton>,
-            Without<HudBottomRow>,
-            Without<AimGuideButton>,
-            Without<ColorblindButton>,
-        ),
-    >,
-    mut cb_btn_query: Query<
-        &mut Node,
-        (
-            With<ColorblindButton>,
-            Without<HudBottomRow>,
-            Without<AimGuideButton>,
-            Without<EffectsButton>,
-        ),
-    >,
+        Option<&HudTopRow>,
+        Option<&HudBottomRow>,
+        Option<&HudLeftCol>,
+        Option<&HudCenterCol>,
+        Option<&HudRightCol>,
+        Option<&AimGuideButton>,
+        Option<&EffectsButton>,
+        Option<&ColorblindButton>,
+    )>,
 ) {
     let Ok(window) = window_query.single() else {
         return;
@@ -1128,138 +1062,125 @@ fn responsive_hud_layout(
 
     let is_vertical = window.width() < window.height();
 
-    if let Ok(mut top_row) = top_row_query.single_mut() {
-        let (dir, align, justify, gap) = if is_vertical {
-            (
-                FlexDirection::Column,
-                AlignItems::Center,
-                JustifyContent::Center,
-                Val::Px(8.0),
-            )
-        } else {
-            (
-                FlexDirection::Row,
-                AlignItems::Center,
-                JustifyContent::SpaceBetween,
-                Val::Px(0.0),
-            )
-        };
-        if top_row.flex_direction != dir {
-            top_row.flex_direction = dir;
-        }
-        if top_row.align_items != align {
-            top_row.align_items = align;
-        }
-        if top_row.justify_content != justify {
-            top_row.justify_content = justify;
-        }
-        if top_row.row_gap != gap {
-            top_row.row_gap = gap;
-        }
-    }
-
-    if let Ok(mut bottom_row) = bottom_row_query.single_mut() {
-        let (dir, align, justify, r_gap, c_gap) = if is_vertical {
-            (
-                FlexDirection::Row,
-                AlignItems::Center,
-                JustifyContent::Center,
-                Val::Px(0.0),
-                Val::Px(10.0),
-            )
-        } else {
-            (
-                FlexDirection::Row,
-                AlignItems::Center,
-                JustifyContent::FlexEnd,
-                Val::Px(0.0),
-                Val::Px(15.0),
-            )
-        };
-        if bottom_row.flex_direction != dir {
-            bottom_row.flex_direction = dir;
-        }
-        if bottom_row.align_items != align {
-            bottom_row.align_items = align;
-        }
-        if bottom_row.justify_content != justify {
-            bottom_row.justify_content = justify;
-        }
-        if bottom_row.row_gap != r_gap {
-            bottom_row.row_gap = r_gap;
-        }
-        if bottom_row.column_gap != c_gap {
-            bottom_row.column_gap = c_gap;
-        }
-    }
-
     let (btn_width, btn_height) = if is_vertical {
         (Val::Px(105.0), Val::Px(45.0))
     } else {
         (Val::Px(180.0), Val::Px(50.0))
     };
 
-    if let Ok(mut node) = aim_btn_query.single_mut() {
-        if node.width != btn_width {
-            node.width = btn_width;
-        }
-        if node.height != btn_height {
-            node.height = btn_height;
-        }
-    }
-    if let Ok(mut node) = fx_btn_query.single_mut() {
-        if node.width != btn_width {
-            node.width = btn_width;
-        }
-        if node.height != btn_height {
-            node.height = btn_height;
-        }
-    }
-    if let Ok(mut node) = cb_btn_query.single_mut() {
-        if node.width != btn_width {
-            node.width = btn_width;
-        }
-        if node.height != btn_height {
-            node.height = btn_height;
-        }
-    }
-
-    if let Ok(mut left_col) = left_col_query.single_mut() {
-        let (width, justify) = if is_vertical {
-            (Val::Percent(100.0), JustifyContent::Center)
-        } else {
-            (Val::Percent(33.333), JustifyContent::FlexStart)
-        };
-        if left_col.width != width {
-            left_col.width = width;
-        }
-        if left_col.justify_content != justify {
-            left_col.justify_content = justify;
-        }
-    }
-
-    if let Ok(mut center_col) = center_col_query.single_mut() {
-        let width = if is_vertical {
-            Val::Percent(100.0)
-        } else {
-            Val::Percent(33.333)
-        };
-        if center_col.width != width {
-            center_col.width = width;
-        }
-    }
-
-    if let Ok(mut right_col) = right_col_query.single_mut() {
-        let (width, justify) = if is_vertical {
-            (Val::Percent(100.0), JustifyContent::Center)
-        } else {
-            (Val::Percent(33.333), JustifyContent::FlexEnd)
-        };
-        if right_col.width != width {
-            right_col.width = width;
-        }
-        if right_col.justify_content != justify {
-            right_col.justify_content = justify;
+    for (
+        mut node,
+        top_row,
+        bottom_row,
+        left_col,
+        center_col,
+        right_col,
+        aim_btn,
+        effects_btn,
+        cb_btn,
+    ) in nodes_query.iter_mut()
+    {
+        if top_row.is_some() {
+            let (dir, align, justify, gap) = if is_vertical {
+                (
+                    FlexDirection::Column,
+                    AlignItems::Center,
+                    JustifyContent::Center,
+                    Val::Px(8.0),
+                )
+            } else {
+                (
+                    FlexDirection::Row,
+                    AlignItems::Center,
+                    JustifyContent::SpaceBetween,
+                    Val::Px(0.0),
+                )
+            };
+            if node.flex_direction != dir {
+                node.flex_direction = dir;
+            }
+            if node.align_items != align {
+                node.align_items = align;
+            }
+            if node.justify_content != justify {
+                node.justify_content = justify;
+            }
+            if node.row_gap != gap {
+                node.row_gap = gap;
+            }
+        } else if bottom_row.is_some() {
+            let (dir, align, justify, r_gap, c_gap) = if is_vertical {
+                (
+                    FlexDirection::Row,
+                    AlignItems::Center,
+                    JustifyContent::Center,
+                    Val::Px(0.0),
+                    Val::Px(10.0),
+                )
+            } else {
+                (
+                    FlexDirection::Row,
+                    AlignItems::Center,
+                    JustifyContent::FlexEnd,
+                    Val::Px(0.0),
+                    Val::Px(15.0),
+                )
+            };
+            if node.flex_direction != dir {
+                node.flex_direction = dir;
+            }
+            if node.align_items != align {
+                node.align_items = align;
+            }
+            if node.justify_content != justify {
+                node.justify_content = justify;
+            }
+            if node.row_gap != r_gap {
+                node.row_gap = r_gap;
+            }
+            if node.column_gap != c_gap {
+                node.column_gap = c_gap;
+            }
+        } else if left_col.is_some() {
+            let (width, justify) = if is_vertical {
+                (Val::Percent(100.0), JustifyContent::Center)
+            } else {
+                (Val::Percent(33.333), JustifyContent::FlexStart)
+            };
+            if node.width != width {
+                node.width = width;
+            }
+            if node.justify_content != justify {
+                node.justify_content = justify;
+            }
+        } else if center_col.is_some() {
+            let width = if is_vertical {
+                Val::Percent(100.0)
+            } else {
+                Val::Percent(33.333)
+            };
+            if node.width != width {
+                node.width = width;
+            }
+        } else if right_col.is_some() {
+            let (width, justify) = if is_vertical {
+                (Val::Percent(100.0), JustifyContent::Center)
+            } else {
+                (Val::Percent(33.333), JustifyContent::FlexEnd)
+            };
+            if node.width != width {
+                node.width = width;
+            }
+            if node.justify_content != justify {
+                node.justify_content = justify;
+            }
+        } else if aim_btn.is_some() || effects_btn.is_some() || cb_btn.is_some() {
+            if node.width != btn_width {
+                node.width = btn_width;
+            }
+            if node.height != btn_height {
+                node.height = btn_height;
+            }
         }
     }
 }
