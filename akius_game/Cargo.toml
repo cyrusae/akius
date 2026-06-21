@@ -2,6 +2,7 @@
 name = "akius_game"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 akius_core = { path = "../akius_core" }
@@ -49,8 +50,9 @@ bevy = { version = "0.18.1", default-features = false, features = [
     "bevy_audio",
     "vorbis",
     "wav",
+    "debug",
 ] }
-bevy_rapier3d = { version = "0.34.0", default-features = false, features = ["dim3", "simd-stable"] }
+bevy_rapier3d = { version = "0.34.0", default-features = false, features = ["dim3", "enhanced-determinism"] }
 bevy_mesh = "0.18.1"
 rand = "0.9"
 

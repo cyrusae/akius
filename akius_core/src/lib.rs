@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::{ActiveEvents, RigidBody, Velocity};
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 pub mod core_math;
 
@@ -99,6 +101,43 @@ impl Default for ActiveFulfillment {
     }
 }
 
+#[derive(Resource, Default, Debug, Clone)]
+pub struct QueuedInputs {
+    pub fire_requested: bool,
+    pub target_x: Option<f32>,
+}
+
+#[derive(Resource)]
+pub struct GameRng {
+    pub seed: u64,
+    pub rng: StdRng,
+}
+
+impl Default for GameRng {
+    fn default() -> Self {
+        let seed = rand::random::<u64>();
+        Self {
+            seed,
+            rng: StdRng::seed_from_u64(seed),
+        }
+    }
+}
+
+impl GameRng {
+    pub fn new(seed: u64) -> Self {
+        Self {
+            seed,
+            rng: StdRng::seed_from_u64(seed),
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SphereId(pub u32);
+
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct NextSphereId(pub u32);
+
 #[derive(Message, Debug, Clone, Copy)]
 pub struct MergeBurstEvent {
     pub position: Vec3,
@@ -157,6 +196,7 @@ pub fn check_order_fulfillment(
     >,
     all_spheres: Query<&Transform, With<Sphere>>,
     mut fulfillment_burst_events: MessageWriter<FulfillmentBurstEvent>,
+    mut game_rng: ResMut<GameRng>,
 ) {
     if let Some(entity) = fulfillment.entity {
         fulfillment.timer.tick(time.delta());
@@ -182,7 +222,8 @@ pub fn check_order_fulfillment(
                 let w5 = 5u32;
                 let w7 = 100 - w5 - w6 - w8;
 
-                let roll = rand::random_range(0..100);
+                use rand::Rng;
+                let roll = game_rng.rng.random_range(0..100);
                 active_order.target_tier = if roll < w5 {
                     5
                 } else if roll < w5 + w6 {
@@ -222,6 +263,7 @@ pub fn reset_game_state(
     mut queue: ResMut<DispenserQueue>,
     mut fulfillment: ResMut<ActiveFulfillment>,
     sphere_query: Query<Entity, With<Sphere>>,
+    game_tick: Option<ResMut<GameTick>>,
 ) {
     info!("Resetting game state!");
     for entity in sphere_query.iter() {
@@ -238,9 +280,15 @@ pub fn reset_game_state(
     queue.next = 2;
 
     *fulfillment = ActiveFulfillment::default();
+
+    if let Some(mut tick) = game_tick {
+        tick.0 = 0;
+    }
 }
 
 pub mod physics_rules;
+pub mod replay;
+pub use replay::*;
 
 #[cfg(test)]
 mod tests {
@@ -344,6 +392,7 @@ mod tests {
         });
         app.insert_resource(ActiveOrder { target_tier: 4 });
         app.insert_resource(ActiveFulfillment::default());
+        app.insert_resource(GameRng::default());
         app.add_systems(Update, check_order_fulfillment);
 
         let sphere_entity = app

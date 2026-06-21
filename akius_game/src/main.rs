@@ -33,11 +33,13 @@ fn main() {
         )
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugins(akius_core::physics_rules::PhysicsPlugin)
+        .add_plugins(akius_core::replay::ReplayPlugin)
         .add_plugins(launcher::LauncherPlugin)
         .add_plugins(visuals::VisualPlugin)
         .add_plugins(hud::HudPlugin)
         .add_plugins(crt_post_process::CrtPostProcessPlugin)
         .init_state::<AppState>()
+        .insert_resource(Time::<Fixed>::from_hz(60.0))
         .insert_resource(GameSettings::default())
         .insert_resource(Score::default())
         .insert_resource(ColorblindMode::default())
@@ -59,7 +61,7 @@ fn main() {
             reset_game_state,
         )
         .add_systems(
-            Update,
+            FixedUpdate,
             (
                 check_loss_condition,
                 check_order_fulfillment,

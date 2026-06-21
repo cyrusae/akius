@@ -26,8 +26,10 @@ impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MergeEvent>()
             .add_message::<MergeBurstEvent>()
+            .init_resource::<NextSphereId>()
+            .init_resource::<GameRng>()
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     (detect_collisions, check_distance_merges),
                     resolve_merges,
@@ -36,14 +38,16 @@ impl Plugin for PhysicsPlugin {
                     spill_spheres,
                 )
                     .chain()
+                    .after(PhysicsSet::Writeback)
                     .run_if(in_state(AppState::InGame)),
             )
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     handle_despawn_delay.after(resolve_merges),
                     despawn_fallen_spheres,
-                ),
+                )
+                    .after(PhysicsSet::Writeback),
             )
             .add_systems(
                 OnEnter(AppState::GameOver),
@@ -54,6 +58,7 @@ impl Plugin for PhysicsPlugin {
 
 pub fn spawn_sphere_entity<'a>(
     commands: &'a mut Commands,
+    id: u32,
     tier: u8,
     mut translation: Vec3,
     velocity: Vec3,
@@ -63,6 +68,7 @@ pub fn spawn_sphere_entity<'a>(
     let density = 15.0 / (tier as f32).powf(0.8);
     let cmd = commands.spawn((
         Sphere { tier },
+        SphereId(id),
         Transform::from_translation(translation),
         RigidBody::Dynamic,
         Collider::ball(radius),
@@ -174,6 +180,7 @@ pub fn resolve_merges(
     sphere_query: Query<(&Sphere, &Transform, &Velocity)>,
     mut next_state: ResMut<NextState<AppState>>,
     mut merge_burst_events: MessageWriter<MergeBurstEvent>,
+    mut next_id: ResMut<NextSphereId>,
 ) {
     let mut merged_this_frame = HashSet::new();
     for event in merge_events.read() {
@@ -213,8 +220,10 @@ pub fn resolve_merges(
 
                 let merged_velocity = (v1.linear + v2.linear) * 0.5 * 0.5;
 
+                let id = next_id.0;
+                next_id.0 += 1;
                 let mut cmd =
-                    spawn_sphere_entity(&mut commands, next_tier, midpoint, merged_velocity);
+                    spawn_sphere_entity(&mut commands, id, next_tier, midpoint, merged_velocity);
                 cmd.insert(MergeCooldown {
                     timer: Timer::from_seconds(0.35, TimerMode::Once),
                 });
@@ -330,7 +339,8 @@ mod tests {
 
         let entity = spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            1,
+            1, // ID
+            1, // Tier
             Vec3::new(1.0, 0.0, 2.0),
             Vec3::new(0.0, 0.0, -10.0),
         )
@@ -381,6 +391,10 @@ mod tests {
     fn test_collision_midpoint_merge() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.insert_resource(Time::<Fixed>::from_hz(60.0));
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f32(1.0 / 60.0),
+        ));
         app.add_plugins(bevy::state::app::StatesPlugin);
         app.init_state::<AppState>();
         app.add_message::<CollisionEvent>();
@@ -400,14 +414,16 @@ mod tests {
 
         let entity_a = spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            1,
+            1, // ID
+            1, // Tier
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(10.0, 0.0, 0.0),
         )
         .id();
         let entity_b = spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            1,
+            2, // ID
+            1, // Tier
             Vec3::new(2.0, 0.0, 0.0),
             Vec3::new(-10.0, 0.0, 0.0),
         )
@@ -455,6 +471,10 @@ mod tests {
     fn test_double_merge_safety() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.insert_resource(Time::<Fixed>::from_hz(60.0));
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f32(1.0 / 60.0),
+        ));
         app.add_plugins(bevy::state::app::StatesPlugin);
         app.init_state::<AppState>();
         app.add_message::<CollisionEvent>();
@@ -474,21 +494,24 @@ mod tests {
 
         let entity_a = spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            1,
+            1, // ID
+            1, // Tier
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::ZERO,
         )
         .id();
         let entity_b = spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            1,
+            2, // ID
+            1, // Tier
             Vec3::new(1.0, 0.0, 0.0),
             Vec3::ZERO,
         )
         .id();
         let entity_c = spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            1,
+            3, // ID
+            1, // Tier
             Vec3::new(2.0, 0.0, 0.0),
             Vec3::ZERO,
         )
@@ -523,6 +546,10 @@ mod tests {
     fn test_merge_momentum_conservation() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.insert_resource(Time::<Fixed>::from_hz(60.0));
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f32(1.0 / 60.0),
+        ));
         app.add_plugins(bevy::state::app::StatesPlugin);
         app.init_state::<AppState>();
         app.add_message::<CollisionEvent>();
@@ -542,14 +569,16 @@ mod tests {
 
         let entity_a = spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            1,
+            1, // ID
+            1, // Tier
             Vec3::ZERO,
             Vec3::new(10.0, 0.0, 0.0),
         )
         .id();
         let entity_b = spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            1,
+            2, // ID
+            1, // Tier
             Vec3::ZERO,
             Vec3::new(20.0, 0.0, 0.0),
         )
@@ -594,7 +623,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Sphere { tier: 1 },
-                Transform::from_xyz(0.0, 0.0, 10.0),
+                Transform::from_xyz(0.0, 0.0, 12.0), // Exactly on boundary, should NOT spill
                 LockedAxes::TRANSLATION_LOCKED_Y,
             ))
             .id();
@@ -603,7 +632,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Sphere { tier: 1 },
-                Transform::from_xyz(0.0, 0.0, 13.0),
+                Transform::from_xyz(0.0, 0.0, 12.0001), // Just past boundary, should spill
                 LockedAxes::TRANSLATION_LOCKED_Y,
             ))
             .id();
@@ -664,7 +693,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Sphere { tier: 1 },
-                Transform::from_xyz(0.0, 0.0, -1.5),
+                Transform::from_xyz(0.0, 0.0, -1.5), // z_start is -0.6, so -1.5 is outside range
                 Velocity {
                     linear: Vec3::new(0.0, 0.0, 10.0),
                     angular: Vec3::ZERO,
@@ -679,8 +708,8 @@ mod tests {
             .entity(entity_damping)
             .get::<Velocity>()
             .unwrap();
-        assert!(vel_damping.linear.z < 10.0);
-        assert!(vel_damping.linear.z > 0.0);
+        // Exact damped velocity: 10.0 * (1.0 - 0.5 * 0.40) = 8.0
+        assert_eq!(vel_damping.linear.z, 8.0);
 
         let vel_no_damping_dir = app
             .world()
@@ -695,5 +724,81 @@ mod tests {
             .get::<Velocity>()
             .unwrap();
         assert_eq!(vel_no_damping_pos.linear.z, 10.0);
+    }
+
+    #[test]
+    fn test_distance_merge_boundaries() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        // Force manual FixedUpdate execution
+        app.insert_resource(Time::<Fixed>::from_hz(60.0));
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f32(1.0 / 60.0),
+        ));
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
+        app.add_message::<CollisionEvent>();
+        app.add_plugins(PhysicsPlugin);
+        app.insert_resource(Score::default());
+        app.insert_resource(GameSettings::default());
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::InGame);
+        app.update();
+
+        // 1. Spawning two spheres just out of range:
+        // Radius(1) = 0.5. sum of radii + 0.07 = 1.07
+        let entity_a = spawn_sphere_entity(
+            &mut app.world_mut().commands(),
+            1, // ID
+            1, // Tier
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::ZERO,
+        )
+        .id();
+        let entity_b = spawn_sphere_entity(
+            &mut app.world_mut().commands(),
+            2, // ID
+            1, // Tier
+            Vec3::new(1.07, 0.0, 0.0), // exactly 1.07 distance
+            Vec3::ZERO,
+        )
+        .id();
+
+        app.update();
+        
+        // They should NOT merge
+        assert!(app.world().get_entity(entity_a).is_ok());
+        assert!(app.world().get_entity(entity_b).is_ok());
+
+        // Despawn them
+        app.world_mut().entity_mut(entity_a).despawn();
+        app.world_mut().entity_mut(entity_b).despawn();
+
+        // 2. Spawning two spheres just in range:
+        let entity_c = spawn_sphere_entity(
+            &mut app.world_mut().commands(),
+            1, // ID
+            1, // Tier
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::ZERO,
+        )
+        .id();
+        let entity_d = spawn_sphere_entity(
+            &mut app.world_mut().commands(),
+            2, // ID
+            1, // Tier
+            Vec3::new(1.069, 0.0, 0.0), // slightly less than 1.07
+            Vec3::ZERO,
+        )
+        .id();
+
+        app.update(); // run detect/resolve
+        app.update(); // handle despawn delay
+
+        // They SHOULD merge
+        assert!(app.world().get_entity(entity_c).is_err());
+        assert!(app.world().get_entity(entity_d).is_err());
     }
 }

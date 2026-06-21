@@ -1512,14 +1512,16 @@ mod tests {
 
         let entity_a = akius_core::physics_rules::spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            1,
+            1, // ID
+            1, // Tier
             Vec3::new(-0.2, 0.0, 0.0),
             Vec3::ZERO,
         )
         .id();
         let entity_b = akius_core::physics_rules::spawn_sphere_entity(
             &mut app.world_mut().commands(),
-            1,
+            2, // ID
+            1, // Tier
             Vec3::new(0.2, 0.0, 0.0),
             Vec3::ZERO,
         )

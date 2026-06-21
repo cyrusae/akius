@@ -39,29 +39,58 @@ mod tests {
 
     #[test]
     fn test_radius_scaling() {
-        // Tier 1 should be exactly 0.5
-        assert_eq!(get_radius(1), 0.5);
+        // Exact expected radii for tiers 1 to 9
+        let expected_radii = [
+            (1, 0.5),
+            (2, 0.605),
+            (3, 0.73205),
+            (4, 0.8857805),
+            (5, 1.0717944),
+            (6, 1.2968712),
+            (7, 1.5692142),
+            (8, 1.8987492),
+            (9, 2.2974865),
+        ];
 
-        // Tier 9 should be approx 2.30
-        let r9 = get_radius(9);
-        assert!(
-            (r9 - 2.298).abs() < 0.01,
-            "Expected r9 to be ~2.30, got {}",
-            r9
-        );
+        for &(tier, expected) in &expected_radii {
+            let actual = get_radius(tier);
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "Expected radius for tier {} to be {}, got {}",
+                tier,
+                expected,
+                actual
+            );
+        }
 
-        // Out-of-bounds values should clamp gracefully
+        // Out-of-bounds values should clamp gracefully to tier 1 and tier 9 respectively
         assert_eq!(get_radius(0), get_radius(1));
         assert_eq!(get_radius(10), get_radius(9));
     }
 
     #[test]
     fn test_scoring_math() {
-        assert_eq!(get_merge_points(1), 100);
-        assert_eq!(get_merge_points(5), 500);
+        // Test all merge points from resulting tiers 1 to 9
+        for tier in 1..=9 {
+            let expected_points = tier as u32 * 100;
+            assert_eq!(
+                get_merge_points(tier),
+                expected_points,
+                "Merge points mismatch for tier {}",
+                tier
+            );
+        }
 
-        assert_eq!(get_order_points(3), 1500);
-        assert_eq!(get_order_points(6), 3000);
+        // Test all order points from target tiers 1 to 9
+        for tier in 1..=9 {
+            let expected_points = tier as u32 * 500;
+            assert_eq!(
+                get_order_points(tier),
+                expected_points,
+                "Order points mismatch for tier {}",
+                tier
+            );
+        }
     }
 
     #[test]

@@ -524,15 +524,24 @@ fn handle_effects_button(
 }
 
 fn update_effects_button_text(
+    window_query: Query<&Window>,
     effects_mode: Res<crate::visuals::VisualEffectsMode>,
-    mut query: Query<&mut Text, With<EffectsButtonText>>,
+    mut query: Query<(&mut Text, &mut TextFont), With<EffectsButtonText>>,
 ) {
-    if effects_mode.is_changed() {
-        for mut text in &mut query {
-            text.0 = match *effects_mode {
-                crate::visuals::VisualEffectsMode::On => "FX: ON".to_string(),
-                crate::visuals::VisualEffectsMode::Off => "FX: OFF".to_string(),
-            };
+    let Ok(window) = window_query.single() else { return; };
+    let is_vertical = window.width() < window.height();
+    if let Ok((mut text, mut font)) = query.single_mut() {
+        let label = "FX";
+        let new_text = match *effects_mode {
+            crate::visuals::VisualEffectsMode::On => format!("{}: ON", label),
+            crate::visuals::VisualEffectsMode::Off => format!("{}: OFF", label),
+        };
+        if text.0 != new_text {
+            text.0 = new_text;
+        }
+        let size = if is_vertical { 14.0 } else { 18.0 };
+        if font.font_size != size {
+            font.font_size = size;
         }
     }
 }
@@ -584,12 +593,21 @@ fn handle_colorblind_button(
 }
 
 fn update_colorblind_button_text(
+    window_query: Query<&Window>,
     colorblind: Res<ColorblindMode>,
-    mut query: Query<&mut Text, With<ColorblindButtonText>>,
+    mut query: Query<(&mut Text, &mut TextFont), With<ColorblindButtonText>>,
 ) {
-    if colorblind.is_changed() {
-        if let Ok(mut text) = query.single_mut() {
-            text.0 = format!("Numbers: {}", if colorblind.0 { "ON" } else { "OFF" });
+    let Ok(window) = window_query.single() else { return; };
+    let is_vertical = window.width() < window.height();
+    if let Ok((mut text, mut font)) = query.single_mut() {
+        let label = if is_vertical { "Num" } else { "Numbers" };
+        let new_text = format!("{}: {}", label, if colorblind.0 { "ON" } else { "OFF" });
+        if text.0 != new_text {
+            text.0 = new_text;
+        }
+        let size = if is_vertical { 14.0 } else { 18.0 };
+        if font.font_size != size {
+            font.font_size = size;
         }
     }
 }
@@ -999,12 +1017,21 @@ fn handle_aim_guide_button(
 }
 
 fn update_aim_guide_button_text(
+    window_query: Query<&Window>,
     aim_line_mode: Res<AimLineMode>,
-    mut query: Query<&mut Text, With<AimGuideButtonText>>,
+    mut query: Query<(&mut Text, &mut TextFont), With<AimGuideButtonText>>,
 ) {
-    if aim_line_mode.is_changed() {
-        if let Ok(mut text) = query.single_mut() {
-            text.0 = format!("Aim Line: {}", if aim_line_mode.0 { "ON" } else { "OFF" });
+    let Ok(window) = window_query.single() else { return; };
+    let is_vertical = window.width() < window.height();
+    if let Ok((mut text, mut font)) = query.single_mut() {
+        let label = if is_vertical { "Aim" } else { "Aim Line" };
+        let new_text = format!("{}: {}", label, if aim_line_mode.0 { "ON" } else { "OFF" });
+        if text.0 != new_text {
+            text.0 = new_text;
+        }
+        let size = if is_vertical { 14.0 } else { 18.0 };
+        if font.font_size != size {
+            font.font_size = size;
         }
     }
 }
@@ -1061,6 +1088,9 @@ fn responsive_hud_layout(
             Without<HudCenterCol>,
         ),
     >,
+    mut aim_btn_query: Query<&mut Node, (With<AimGuideButton>, Without<HudBottomRow>, Without<EffectsButton>, Without<ColorblindButton>)>,
+    mut fx_btn_query: Query<&mut Node, (With<EffectsButton>, Without<HudBottomRow>, Without<AimGuideButton>, Without<ColorblindButton>)>,
+    mut cb_btn_query: Query<&mut Node, (With<ColorblindButton>, Without<HudBottomRow>, Without<AimGuideButton>, Without<EffectsButton>)>,
 ) {
     let Ok(window) = window_query.single() else {
         return;
@@ -1101,11 +1131,11 @@ fn responsive_hud_layout(
     if let Ok(mut bottom_row) = bottom_row_query.single_mut() {
         let (dir, align, justify, r_gap, c_gap) = if is_vertical {
             (
-                FlexDirection::Column,
+                FlexDirection::Row,
                 AlignItems::Center,
                 JustifyContent::Center,
-                Val::Px(10.0),
                 Val::Px(0.0),
+                Val::Px(10.0),
             )
         } else {
             (
@@ -1131,6 +1161,25 @@ fn responsive_hud_layout(
         if bottom_row.column_gap != c_gap {
             bottom_row.column_gap = c_gap;
         }
+    }
+
+    let (btn_width, btn_height) = if is_vertical {
+        (Val::Px(105.0), Val::Px(45.0))
+    } else {
+        (Val::Px(180.0), Val::Px(50.0))
+    };
+
+    if let Ok(mut node) = aim_btn_query.single_mut() {
+        if node.width != btn_width { node.width = btn_width; }
+        if node.height != btn_height { node.height = btn_height; }
+    }
+    if let Ok(mut node) = fx_btn_query.single_mut() {
+        if node.width != btn_width { node.width = btn_width; }
+        if node.height != btn_height { node.height = btn_height; }
+    }
+    if let Ok(mut node) = cb_btn_query.single_mut() {
+        if node.width != btn_width { node.width = btn_width; }
+        if node.height != btn_height { node.height = btn_height; }
     }
 
     if let Ok(mut left_col) = left_col_query.single_mut() {

@@ -2,6 +2,7 @@
 name = "akius_core"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 bevy = { version = "0.18.1", default-features = false, features = [
@@ -10,9 +11,12 @@ bevy = { version = "0.18.1", default-features = false, features = [
     "multi_threaded",
     "bevy_log",
     "bevy_state",
+    "debug",
 ] }
-bevy_rapier3d = { version = "0.34.0", default-features = false, features = ["dim3", "simd-stable"] }
+bevy_rapier3d = { version = "0.34.0", default-features = false, features = ["dim3", "enhanced-determinism"] }
 rand = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
