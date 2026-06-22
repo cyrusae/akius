@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 
+[lib]
+name = "akius_train"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 akius_core = { path = "../akius_core" }
-pyo3 = { version = "0.29", features = ["extension-module"], optional = true }
+pyo3 = { version = "0.29", features = ["extension-module"] }
+numpy = "0.29"
+bevy = { version = "0.18.1", default-features = false }
+bevy_rapier3d = { version = "0.34.0", default-features = false, features = ["dim3", "enhanced-determinism"] }
+rand = "0.9"
