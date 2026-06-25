@@ -15,3 +15,5 @@ numpy = "0.29"
 bevy = { version = "0.18.1", default-features = false }
 bevy_rapier3d = { version = "0.34.0", default-features = false, features = ["dim3", "enhanced-determinism"] }
 rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

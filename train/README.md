@@ -1,0 +1,1 @@
+Training a neural network to play akiuS.

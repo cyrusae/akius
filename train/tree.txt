@@ -1,0 +1,106 @@
+  The core idea
+  
+  MCTS builds a tree in memory. Each node represents a game state. We run num_simulations rounds of exploration, then pick the action with the
+  most visits.
+
+  One round looks like this:
+  1. Select — walk down the tree following a formula that balances "known good" vs "unexplored"
+  2. Expand — at the leaf, ask the network what it thinks of this position
+  3. Backprop — send the network's value estimate back up the whole path
+
+  After enough rounds, nodes visited more = actions the network thinks are good AND that survived scrutiny under the selection formula.
+
+  ---
+  MCTSNode
+
+  Each node stores four things:
+
+  prior: float           # P(s,a) — the policy network's initial guess for this action
+  visit_count: int       # N — how many simulations have passed through here
+  value_sum: float       # W — sum of all value estimates that came through here
+  children: dict         # action (int) → MCTSNode
+
+  And a few derived things:
+  - Q = value_sum / visit_count — mean value of this node (0 if unvisited)
+  - is_expanded = len(children) > 0
+  
+  The PUCT score is what drives selection. For a child node, given its parent's visit count:
+
+  U = c_puct × prior × sqrt(max(1, parent_visits)) / (1 + visit_count)
+  PUCT = Q + U
+
+  Q rewards exploitation (go where value was high). U rewards exploration (go where prior is high but we haven't visited much). The max(1, ...)
+  stops U from being 0 on the very first simulation before the parent has any visits.
+
+  c_puct = 1.5 is a reasonable starting constant — higher means more exploration.
+
+  Methods the node needs:
+  - select_child(c_puct) — pick the child with the highest PUCT score
+  - expand(policy_probs) — create 35 children, one per action, each with its prior from the policy network
+  - update(value) — visit_count += 1, value_sum += value
+
+  ---
+  MCTS class
+  
+  __init__ takes network, num_simulations=400, c_puct=1.5.
+
+  _evaluate(obs) — runs the network, returns (policy_probs, value). Two things:
+  - Policy logits → softmax → numpy array of shape [35]
+  - Value → .item() to get a plain Python float
+  - Wrap in torch.no_grad() (no gradient tracking needed for inference)
+
+  _simulate(env, episode_seed, episode_actions) — one round of MCTS:
+  Reset env to root state:
+    env.reset(seed=episode_seed)
+    for each action in episode_actions: env.step(action)
+    
+  Walk the tree:
+    while node.is_expanded:
+      action, child = node.select_child(c_puct)
+      add (child) to path
+      obs, _, terminated, truncated, info = env.step(action)
+      node = child
+      if terminated or truncated:
+        terminal_value = +50 if win, -10 if loss, else 0
+        update all nodes in path with terminal_value
+        return
+        
+  At the leaf (unexpanded node):
+    policy_probs, value = _evaluate(obs)
+    node.expand(policy_probs)
+    update all nodes in path with value
+
+  Note: this is a single-player game, so the value propagates up the path unchanged. Two-player AlphaZero negates the value at each level (good
+  for me = bad for opponent). We don't do that here.
+
+  run(env, obs, episode_seed, episode_actions) — returns visit count array:
+  self.root = MCTSNode(prior=1.0)
+  expand root with _evaluate(obs)
+  run num_simulations of _simulate(...)
+  return np.array of root.children[a].visit_count for a in range(35)
+
+  get_action_probs(visits, temperature=1.0) — converts visits to probabilities:
+  - temperature=1.0: proportional to visit counts (exploration)
+  - temperature=0: one-hot on the most-visited action (pure exploitation)
+  - Formula: visits ** (1/temperature), then normalize
+
+  For the temperature=0 case, 0 ** x is 0 and would divide by zero, so handle that as a special case with argmax.
+
+  ---
+  One important subtlety: episode_actions
+  
+  When a hard cap fires, the Rust code shoots action 16 even if Python passed something else. Your self-play loop (which we haven't written
+  yet) needs to track what actually happened:
+
+  if info.get("hard_cap_violated"):
+      recorded_action = 16
+  else:
+      recorded_action = action
+  episode_actions.append(recorded_action)
+
+  Pass episode_actions (not the raw Python actions) to run(). Otherwise replays inside MCTS will diverge from the real game state.
+
+  ---
+  File structure
+
+  train/mcts.py — just the two classes. Imports: math, numpy, torch, dataclasses, and AkiusNet from .network.
